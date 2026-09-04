@@ -725,6 +725,134 @@ def _cmd_set_viewport_camera(
 # ===========================================================================
 
 
+# ---------------------------------------------------------------------------
+# DENYLIST  (IMPLEMENTATION_PLAN.md section 7)
+#
+# Everything reached through call_method / execute_tool bypasses Epic's own
+# ToolsetPolicy allow-list (V10). That is what makes the capability available
+# to us, and it is also why we need our own brake.
+#
+# Refusal happens HERE, at our dispatcher, with a clean error. It never
+# reaches the engine. A tool that would kill the bridge, kill the editor, or
+# turn our own access off is refused before the call is made.
+#
+# NOT enforced for execute_python. That is the deliberate escape hatch and any
+# denylist there would be theatre - arbitrary Python can always reach the same
+# symbols. The denylist protects the *dispatch-by-id* surface, which is the
+# one an agent drives without reading the code first.
+# ---------------------------------------------------------------------------
+
+# Exact tool ids, matched case-insensitively on the last dotted segment too,
+# so both "EditorAppToolset.StartPIE" and "StartPIE" are caught.
+_DENIED_TOOLS = {
+    # PIE - entering play mode triggers the world change that kills the
+    # in-process listener (IMPLEMENTATION_PLAN.md section 2, ruling 9).
+    "startpie",
+    "stoppie",
+    "ispierunning",
+    # Turning off the MCP server we are talking through.
+    "stopserver",
+    # Turning off Python in UEFN - would disable this bridge permanently and
+    # cannot be undone from inside the bridge.
+    "enablepythoninuefn",
+    "disablepythoninuefn",
+    # Unregistering toolsets removes capability from under us mid-session.
+    "unregister_toolset_class",
+    "unregistertoolsetclass",
+}
+
+# Whole namespaces that are refused outright.
+_DENIED_TOOL_PREFIXES = (
+    "modelcontextprotocol.",
+)
+
+# Console commands that quit, crash, or destabilise the editor.
+_DENIED_CONSOLE_EXACT = {
+    "quit",
+    "exit",
+    "crash",
+    "debug crash",
+    "gpucrash",
+    "debug gpucrash",
+    "obj gc",
+    "gc",
+}
+_DENIED_CONSOLE_PREFIXES = (
+    "quit",
+    "exit",
+    "crash",
+    "debug crash",
+    "debug gpucrash",
+    "obj gc",
+    "r.setres",          # can resize/destabilise the editor viewport
+)
+
+
+class DeniedByPolicy(Exception):
+    """Raised when the local denylist refuses a call before it reaches the engine."""
+
+
+def _assert_tool_allowed(tool_id: str) -> None:
+    """Refuse denied tool ids at our dispatcher, not at the engine."""
+    if not tool_id:
+        raise ValueError("tool_id is required")
+    tid = str(tool_id).strip()
+    low = tid.lower()
+    leaf = low.rsplit(".", 1)[-1]
+
+    for prefix in _DENIED_TOOL_PREFIXES:
+        if low.startswith(prefix):
+            raise DeniedByPolicy(
+                "'%s' is refused by the local denylist: the namespace '%s' is "
+                "blocked because it can stop the MCP server this session runs "
+                "through. Refused before reaching the engine." % (tid, prefix)
+            )
+
+    if low in _DENIED_TOOLS or leaf in _DENIED_TOOLS:
+        raise DeniedByPolicy(
+            "'%s' is refused by the local denylist. PIE control kills the "
+            "in-process listener; StopServer/EnablePythonInUEFN would disable "
+            "this bridge; unregistering a toolset removes capability "
+            "mid-session. Refused before reaching the engine. See "
+            "IMPLEMENTATION_PLAN.md section 7." % tid
+        )
+
+
+def _assert_console_allowed(command: str) -> None:
+    """Refuse console commands that quit or destabilise the editor."""
+    cmd = str(command or "").strip()
+    low = " ".join(cmd.lower().split())
+    if low in _DENIED_CONSOLE_EXACT:
+        raise DeniedByPolicy(
+            "console command '%s' is refused by the local denylist - it would "
+            "quit or destabilise the editor and there may be nobody to restart "
+            "it." % cmd
+        )
+    for prefix in _DENIED_CONSOLE_PREFIXES:
+        if low == prefix or low.startswith(prefix + " "):
+            raise DeniedByPolicy(
+                "console command '%s' is refused by the local denylist "
+                "(matches '%s') - it would quit or destabilise the editor."
+                % (cmd, prefix)
+            )
+
+
+@_register("denylist")
+def _cmd_denylist() -> dict:
+    """Report what the local denylist currently refuses."""
+    return {
+        "tools": sorted(_DENIED_TOOLS),
+        "tool_prefixes": list(_DENIED_TOOL_PREFIXES),
+        "console_exact": sorted(_DENIED_CONSOLE_EXACT),
+        "console_prefixes": list(_DENIED_CONSOLE_PREFIXES),
+        "enforced_at": "the listener's dispatcher, before the engine call",
+        "not_enforced_for": (
+            "execute_python - the deliberate escape hatch; a denylist there "
+            "would be theatre since arbitrary Python reaches the same symbols"
+        ),
+    }
+
+
 def _level_editor():
     """The LevelEditorSubsystem, or raise a clear error."""
     sub = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
@@ -961,6 +1089,7 @@ def _cmd_console_command(command: str, use_game_world: bool = True) -> dict:
     """
     if not command:
         raise ValueError("command is required")
+    _assert_console_allowed(command)
     world = _world(prefer_game=use_game_world)
     if world is None:
         raise RuntimeError("No world available to run the console command against")

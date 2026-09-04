@@ -896,6 +896,21 @@ def set_verse_editable(
     return json.dumps(result, indent=2)
 
 
+@mcp.tool()
+def denylist() -> str:
+    """Show what the local safety denylist refuses.
+
+    Calls that would kill the bridge or the editor are refused by this server
+    before they reach the engine: PIE control (which kills the in-process
+    listener), StopServer, EnablePythonInUEFN, unregistering a toolset, and
+    console commands that quit or force GC.
+
+    Not enforced for execute_python, which is the deliberate escape hatch.
+    """
+    result = _send_command("denylist")
+    return json.dumps(result, indent=2)
+
+
 # ---------------------------------------------------------------------------
 # read_log / read_crashes - off disk, in THIS process
 #
