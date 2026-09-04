@@ -1038,7 +1038,9 @@ def _cmd_validate_assets(
 
         errs = [str(x) for x in errors]
         warns = [str(x) for x in warnings]
-        state = str(outcome).rsplit(".", 1)[-1]
+        # str(outcome) is "<DataValidationResult.VALID: 1>" - take just the
+        # member name, or callers get "VALID: 1>" and every == comparison fails.
+        state = str(outcome).strip("<>").rsplit(".", 1)[-1].split(":")[0].strip()
         if state == "INVALID":
             n_invalid += 1
         n_errors += len(errs)

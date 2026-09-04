@@ -1,172 +1,185 @@
-"""P4 harness - does anything actually WRITE a Creative device option?
+"""P4 harness - what actually WRITES a Creative device option?
 
-RUN THIS ONLY IN A THROWAWAY PROJECT (Blank_Test_Project / TestProject /
-Test_Optimization_Project). It spawns actors and dirties the level on purpose.
-Never point it at TheScar.
+RUN ONLY IN A THROWAWAY PROJECT (Blank_Test_Project / TestProject /
+Test_Optimization_Project). It mutates devices on purpose and saves the level.
+It refuses to run if the editor world looks like TheScar.
 
 WHY IT EXISTS
 -------------
 `ToolsetLibrary.set_object_properties` returns True and reads back changed
 through `ToolsetLibrary.get_object_properties`, while
 `device.get_user_option_value()` still returns the OLD value. The two
-representations disagree (MCP_UPGRADE.md section 0, Trap 1). So this harness
-never trusts a read-back through the writing API. It writes a DISTINCT marker
-per variant, and the caller greps the saved .uasset files on disk to see which
-markers - if any - actually persisted.
+representations disagree (MCP_UPGRADE.md section 0, Trap 1). This harness
+therefore NEVER treats a read-back through the writing API as evidence: it
+reads every representation and reports whether they AGREE, and the caller
+greps the saved .uasset on disk for the per-variant marker.
 
-METHOD
-------
-One barrier per variant, so the variants cannot contaminate each other and a
-single level save settles all of them at once. Each variant writes marker
-"MCP_P4_<ID>" into LabelOverride, preserving every other propertyOverride.
+VARIANTS - one device each, so they cannot contaminate one another
+    A  set_object_properties, plain
+    B  ToolsetLibrary.modify(component) first, then set
+    C  set, then post_edit_change() on component and actor
+    D  set with bypass_container_check = YES
+    E  set_user_option_value(None, k, v)          negative control, expected no-op
+    F  set_editor_property('label_override', v)   the native-UPROPERTY route
 
-Variants:
-  A  set_object_properties, plain
-  B  ToolsetLibrary.modify(component) first, then set
-  C  set, then post_edit_change() on the component and the actor
-  D  set with bypass_container_check = YES
-  E  set via the actor's own set_user_option_value(None, k, v) - the known
-     no-op, kept as the negative control
+Variant F exists because probe 6 (MCP_UPGRADE.md section 13) showed the device
+OPTION layer is a *view* over native UPROPERTYs: writing a native property on
+the Island Settings actor propagated to its device options, to the saved
+.uasset, and even into the .uefnproject. If that generalises, F is the write
+path and the whole ToolsetLibrary route is a dead end.
 
-USAGE (from execute_python, or paste into Tools > Execute Python Script):
+USAGE
     exec(open(r"G:/UEFN/uefn-mcp-server-extended/tests/probe_p4_device_write.py").read())
-    result = run_p4()          # spawns, writes, reports - does NOT save
-    result = run_p4(save=True) # also saves the level so disk can be grepped
-
-Then grep the project's Content folder for MCP_P4_ to see what truly landed.
+    result = run_p4()            # write only
+    result = run_p4(save=True)   # write and save, so disk can be grepped
 """
 
 import json
 
 import unreal
 
-BARRIER_ASSET = "/CRD_VolumetricRegion/Device_Barrier_V2_Placed.Device_Barrier_V2_Placed_C"
 MARKER_PREFIX = "MCP_P4_"
-VARIANTS = ["A", "B", "C", "D", "E"]
+OPTION = "LabelOverride"
+NATIVE = "label_override"
+
+# variant id -> actor label to use
+ASSIGNMENT = [
+    ("A", "Button"),
+    ("B", "Button2"),
+    ("C", "Button3"),
+    ("D", "Button4"),
+    ("E", "Button5"),
+    ("F", "Item Granter"),
+]
 
 
 def _safe_project() -> bool:
-    """Refuse to run against TheScar."""
     world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
     return "thescar" not in world.get_name().lower()
 
 
-def _spawn_barrier(index: int):
-    """Spawn one barrier, spaced out so they are easy to see and select."""
-    cls = unreal.EditorAssetLibrary.load_blueprint_class(BARRIER_ASSET)
-    loc = unreal.Vector(index * 500.0, 0.0, 100.0)
+def _find(label):
     actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-    actor = actor_sub.spawn_actor_from_class(cls, loc, unreal.Rotator(0, 0, 0))
-    actor.set_actor_label("P4_Barrier_%s" % VARIANTS[index])
-    return actor
+    for a in actor_sub.get_all_level_actors():
+        if a.get_actor_label() == label:
+            return a
+    return None
 
 
-def _overrides_json(component) -> str:
+def _overrides(component):
     return unreal.ToolsetLibrary.get_object_properties(component, ["PlayerOptionData"])
 
 
-def _with_label(original_json: str, new_label: str) -> str:
-    """Return the full override array with only LabelOverride changed.
-
-    Writing a single-entry array could drop the other options; always write
-    back the complete set.
-    """
+def _payload(original_json, new_value):
+    """Full override array with only OPTION changed - never write a partial array."""
     parsed = json.loads(original_json)
     found = False
     for o in parsed["PlayerOptionData"]["propertyOverrides"]:
-        if o["propertyName"] == "LabelOverride":
-            o["propertyData"] = new_label
+        if o["propertyName"] == OPTION:
+            o["propertyData"] = new_value
             found = True
     if not found:
         parsed["PlayerOptionData"]["propertyOverrides"].append(
-            {"propertyScope": "", "propertyName": "LabelOverride", "propertyData": new_label}
+            {"propertyScope": "", "propertyName": OPTION, "propertyData": new_value}
         )
     return json.dumps(parsed)
 
 
-def _read_both(actor, component, marker: str) -> dict:
-    """Read the value through BOTH representations and say whether they agree."""
+def _read_all(actor, component, marker):
+    """Read every representation and say whether they agree."""
     try:
-        via_toolset = [
+        vals = [
             o["propertyData"]
-            for o in json.loads(_overrides_json(component))["PlayerOptionData"]["propertyOverrides"]
-            if o["propertyName"] == "LabelOverride"
+            for o in json.loads(_overrides(component))["PlayerOptionData"]["propertyOverrides"]
+            if o["propertyName"] == OPTION
         ]
-        via_toolset = via_toolset[0] if via_toolset else None
+        toolset = vals[0] if vals else None
     except Exception as e:
-        via_toolset = "ERR: %s" % e
-
+        toolset = "ERR:%s" % e
     try:
-        via_option = str(actor.get_user_option_value("LabelOverride"))
+        option = str(actor.get_user_option_value(OPTION))
     except Exception as e:
-        via_option = "ERR: %s" % e
+        option = "ERR:%s" % e
+    try:
+        native = str(actor.get_editor_property(NATIVE))
+    except Exception:
+        native = "<absent>"
 
     return {
-        "toolset_read": via_toolset,
-        "user_option_read": via_option,
-        "actor_label": actor.get_actor_label(),
-        "toolset_took": via_toolset == marker,
-        "user_option_took": via_option == marker,
-        "representations_agree": via_toolset == via_option,
+        "read_toolset": toolset,
+        "read_option": option,
+        "read_native": native,
+        "toolset_took": toolset == marker,
+        "option_took": option == marker,
+        "native_took": native == marker,
+        "all_agree": toolset == option == native,
     }
 
 
 def run_p4(save: bool = False) -> dict:
-    """Run every write variant on its own barrier. Returns a compact report."""
     if not _safe_project():
-        return {"ABORTED": "editor world looks like TheScar - refusing to run"}
+        return {"ABORTED": "editor world looks like TheScar - refusing"}
 
-    report = {"variants": {}, "marker_prefix": MARKER_PREFIX}
+    report = {"marker_prefix": MARKER_PREFIX, "variants": {}}
 
-    for i, vid in enumerate(VARIANTS):
+    for vid, label in ASSIGNMENT:
         marker = MARKER_PREFIX + vid
-        row = {"marker": marker}
+        row = {"marker": marker, "actor_label": label}
         try:
-            actor = _spawn_barrier(i)
-            comp = actor.get_user_option_definitions()
-            original = _overrides_json(comp)
-            payload = _with_label(original, marker)
+            actor = _find(label)
+            if actor is None:
+                row["FAILED"] = "actor not found: %s" % label
+                report["variants"][vid] = row
+                continue
 
-            with unreal.ScopedEditorTransaction("P4 variant %s" % vid):
+            comp = actor.get_user_option_definitions()
+            original = _overrides(comp)
+            payload = _payload(original, marker)
+
+            with unreal.ScopedEditorTransaction("P4 %s" % vid):
                 if vid == "A":
-                    row["call_returned"] = unreal.ToolsetLibrary.set_object_properties(comp, payload)
+                    row["returned"] = unreal.ToolsetLibrary.set_object_properties(comp, payload)
 
                 elif vid == "B":
                     try:
                         unreal.ToolsetLibrary.modify(comp)
-                        row["modify_called"] = True
+                        row["modify"] = True
                     except Exception as e:
-                        row["modify_error"] = str(e)
-                    row["call_returned"] = unreal.ToolsetLibrary.set_object_properties(comp, payload)
+                        row["modify"] = "ERR:%s" % str(e)[:80]
+                    row["returned"] = unreal.ToolsetLibrary.set_object_properties(comp, payload)
 
                 elif vid == "C":
-                    row["call_returned"] = unreal.ToolsetLibrary.set_object_properties(comp, payload)
+                    row["returned"] = unreal.ToolsetLibrary.set_object_properties(comp, payload)
                     for obj, tag in ((comp, "component"), (actor, "actor")):
                         try:
                             obj.post_edit_change()
-                            row["post_edit_change_" + tag] = True
+                            row["pec_" + tag] = True
                         except Exception as e:
-                            row["post_edit_change_" + tag] = "ERR: %s" % e
+                            row["pec_" + tag] = "ERR:%s" % str(e)[:60]
 
                 elif vid == "D":
                     try:
-                        row["call_returned"] = unreal.ToolsetLibrary.set_object_properties(
+                        row["returned"] = unreal.ToolsetLibrary.set_object_properties(
                             comp, payload, unreal.BypassContainerCheck.YES
                         )
                     except Exception as e:
-                        row["call_error"] = str(e)
+                        row["returned"] = "ERR:%s" % str(e)[:120]
 
                 elif vid == "E":
-                    # Negative control: documented to no-op with a None controller.
                     try:
-                        row["call_returned"] = actor.set_user_option_value(
-                            None, "LabelOverride", marker
-                        )
+                        row["returned"] = actor.set_user_option_value(None, OPTION, marker)
                     except Exception as e:
-                        row["call_error"] = str(e)
+                        row["returned"] = "ERR:%s" % str(e)[:120]
 
-            row.update(_read_both(actor, comp, marker))
-            row["actor_path"] = actor.get_path_name()
+                elif vid == "F":
+                    try:
+                        actor.set_editor_property(NATIVE, marker)
+                        row["returned"] = "set_editor_property ok"
+                    except Exception as e:
+                        row["returned"] = "ERR:%s" % str(e)[:120]
+
+            row.update(_read_all(actor, comp, marker))
+            row["package"] = actor.get_outermost().get_name()
 
         except Exception as e:
             row["FAILED"] = repr(e)[:300]
@@ -181,9 +194,5 @@ def run_p4(save: bool = False) -> dict:
         except Exception as e:
             report["save_error"] = str(e)
 
-    report["NEXT"] = (
-        "grep the project's Content folder for %s - disk is the only arbiter. "
-        "A variant is proven ONLY if its marker appears in a saved .uasset."
-        % MARKER_PREFIX
-    )
+    report["NEXT"] = "grep the saved .uasset files for %s - disk is the arbiter" % MARKER_PREFIX
     return report

@@ -25,6 +25,12 @@ that the device's real option state never reads. Verify through the API you wrot
 will report a working write path that does not exist.
 
 **Rule: the writing API's own read-back is worth nothing. Disk is the only arbiter.**
+
+**And it is worse than that.** With `bypass_container_check=YES` (§13e variant D), *two
+independent APIs agreed* on the new value — `ToolsetLibrary.get_object_properties` **and**
+`device.get_user_option_value()` — the label visibly changed in the editor, and it **still**
+did not survive the save. **Cross-API agreement is not evidence either. Only the bytes on
+disk are.**
 Save, then grep the `.uasset` under `__ExternalActors__`. Verified 2026-09-04 - see §11 P4.
 
 ### TRAP 2 - a dropped screenshot task cancels the capture silently
@@ -292,7 +298,11 @@ refs resolved to `{"refPath": "…__verse_0x2DD0D81D_EliminationManager"}`.
 
 ### 9c. §2b's "write path unknown" — a CANDIDATE, **NOT CONFIRMED**
 
-> **STATUS 2026-09-04: REFUTED AS A DIRECT WRITE.** Probe P4 (§11) ran it. The call
+> **STATUS 2026-09-04: REFUTED. Do not build on this.** Probe P4 was run four ways in a
+> sandbox (§13e) — plain, with `modify()`, with `post_edit_change()`, and with
+> `bypass_container_check=YES`. **None persisted to disk.** The confirmed write path is
+> `set_editor_property` on the native UPROPERTY instead (§13d/§13e variant F).
+> The original note below is kept for the record. Probe P4 (§11) first ran it. The call
 > returns `True` and reads back changed through `ToolsetLibrary`, but
 > `get_user_option_value()` still returns the old value. Do NOT read this section as
 > solved. See §0 Trap 1.
@@ -479,10 +489,10 @@ and produced nothing. The listener now holds tasks in `unreal._mcp_screenshot_ta
 #2 and #4 were the same call, and only the earlier one worked. #3 sits between them and is the
 only call that ever passed `force_game_view=False`.
 
-**Sharpened hypothesis: a `force_game_view=False` request wedges the `AutomationLibrary`
-screenshot path, and every later `take_high_res_screenshot` queues behind it forever. The console
-`HighResShot` path is a different code path and is unaffected** - #5 completed normally after the
-wedge. Not a frozen editor: frame count advanced 18793 -> 18836 over ~8 s (~5 fps) throughout.
+**DISPROVED 2026-09-04 — see §13b.** On a clean editor `force_game_view=False`, fired first
+and alone, landed in under 8 seconds, and three further captures with both flag values all
+landed. The flag is innocent; the real variable is almost certainly editor focus / CPU
+throttling. `take_screenshot` is WORKING.
 
 **Also learned: captures are SLOW when the editor is unfocused** - 26 s, 30 s, and once a full
 **3 minutes** between request and file. Every "it produced no file" conclusion earlier in this
@@ -516,3 +526,142 @@ The listener's globals are reachable without a restart:
 `unreal._mcp_server.RequestHandlerClass._send_json.__globals__`. `exec`ing new handler source
 into that dict registers handlers into the live `_HANDLERS` with no server restart and no tick
 re-registration. This is how all six tools were loaded into a live editor this session.
+
+## 13. SANDBOX SESSION — 2026-09-04, Blank_Test_Project
+
+Everything here was run in a throwaway project so the writes could be destructive.
+**The headline: there IS a confirmed, disk-verified write path for device settings, and it is
+NOT the one §9c proposed.**
+
+### 13a. Getting a sandbox running — three environment findings
+
+1. **Python is PER-PROJECT.** It is gated by
+   `dataSets.experimental.pythonExperimental.bEnablePythonForProject` in the `.uefnproject`.
+   TheScar has it; a fresh project does not, so **Tools → Execute Python Script does not even
+   exist** there and the listener cannot start. The Tools menu's "Enable Python" checkbox does
+   **not** persist it — it has to be added to the file by hand.
+   **Any new sandbox project needs this step first.**
+2. **UEFN rewrites `*.uefnproject` while the editor is open.** An edit made with UEFN running was
+   overwritten **97 milliseconds later**. Project-file edits only stick with the editor **fully
+   closed**. Treat this as a hard rule for any tool that writes project files.
+3. **Some "Details panel" settings are plain JSON in the `.uefnproject`** — see 13c. This also
+   corrected a wrong diagnosis: `mms_player_count = 16` is a **maximum**; the real minimum is
+   `minPlayers`, which was 2 on The Scar. **The island never demanded sixteen players.**
+
+### 13b. Screenshots — the wedge hypothesis is DISPROVED
+
+§12 guessed that `force_game_view=False` wedged the `AutomationLibrary` capture path. **It does
+not.** On a clean editor, `force_game_view=False` fired *first and alone* landed in **under 8
+seconds**, and three further back-to-back captures with both flag values all landed. The image
+was opened and inspected: a correct render of the sandbox island.
+
+**`take_screenshot` is WORKING.** The real variable is almost certainly **editor focus / CPU
+throttling** — the earlier session was running at ~5 fps unfocused, where captures took 26 s, 30 s
+and once a full 3 minutes. Poll for minutes, not seconds, when the window is in the background.
+
+### 13c. The `.uefnproject` audit — full `dataSets` enumeration
+
+| Key | Blank | TheScar |
+|---|---|---|
+| `experimental.pythonExperimental.bEnablePythonForProject` | True | True |
+| `experimental.sceneGraph.bIsSceneGraphSystemAllowed` | True | True |
+| `experimental.sceneGraph.bEnableOneFilePerEntity` | False | False |
+| `matchmaking.maxPlayers` | 16 | 16 |
+| `matchmaking.minPlayers` | **1** | **2** |
+| `matchmaking.maxTeamCount` | **16** | **4** |
+| `matchmaking.maxTeamSize` / `maxSocialPartySize` | 16 | 16 |
+| `matchmaking.overtimePlayerTarget` | **1** | **2** |
+| `matchmaking.queueMainDuration` / `queueOvertimeDuration` | 5 | 5 |
+| `matchmaking.islandQueuePrivacy` | Public | Public |
+| `matchmaking.allowJoinInProgress` | True | True |
+| `matchmaking.useSkillBasedMatchmaking` / `allowSquadFillOption` / `splitscreenDisabled` | False | False |
+| `autoLocalization.*`, `ugcLocalization.*` | absent | present (18 cultures) |
+
+**Are they mirrored on the Island Settings actor? YES — as device options, exactly.**
+
+| `.uefnproject` | Island Settings device option | Blank value (both) |
+|---|---|---|
+| `maxPlayers` | `Matchmaking_MaxPlayersPerSession` | 16 |
+| `minPlayers` | `Matchmaking_MinPlayers` | **1** |
+| `maxTeamCount` | `Matchmaking_MaxTeamCount` | **16** |
+| `maxTeamSize` | `Matchmaking_MaxTeamSize` | 16 |
+| `maxSocialPartySize` | `Matchmaking_MaxSocialPartySize` | 16 |
+| `overtimePlayerTarget` | `Matchmaking_OvertimePlayerTarget` | **1** |
+| `queueMainDuration` / `queueOvertimeDuration` | `Matchmaking_QueueMainDuration` / `…Overtime…` | 5 |
+| `islandQueuePrivacy` | `MatchmakingPrivacy`, `CreativeMatchmakingPrivacy` | Public |
+
+This is **differential** confirmation, not coincidence: the three values where Blank differs from
+TheScar (`minPlayers`, `maxTeamCount`, `overtimePlayerTarget`) differ on the actor in exactly the
+same way. The Island Settings actor exposes **299** options in total.
+
+### 13d. PROBE 6 — native property write. **CONFIRMED, and it propagates everywhere.**
+
+`islandSettings.set_editor_property("mms_player_count", 4)` then save:
+
+| Representation | Before | After |
+|---|---|---|
+| native `mms_player_count` | 16 | **4** |
+| native `max_players` | 16 | **4** (a second native property followed) |
+| option `Matchmaking_MaxPlayersPerSession` | 16 | **4** |
+| option `MaxPlayers` | 16 | **4** |
+
+**Disk-verified by differential**, not by read-back: the saved `.uasset` stores the ANSI string
+`'4'` after `Matchmaking_MaxPlayersPerSession`; re-saving at 16 stores `'16'` at the same place.
+(A raw byte diff is useless here — the whole package re-serialises, 28 355 bytes differ.)
+
+**And it round-trips into the `.uefnproject`.** Setting the actor to 8 and saving rewrote the
+project file: `maxPlayers`, `maxSocialPartySize`, `maxTeamCount`, `maxTeamSize` all → 8. The
+editor also silently upgraded `compatibilityVersion` 41.30 → 42.10 on save.
+
+**So the authority chain is: native UPROPERTY → device-option view → saved `.uasset` → `.uefnproject`.**
+The project file is an **output**, not an input, while the editor is open. Combined with 13a.2,
+this settles the tool-surface question: **do NOT build a `.uefnproject` writer for matchmaking
+settings — write the actor instead.** A file writer would be overwritten within 100 ms, and the
+setting it targets is a projection of actor state anyway.
+
+### 13e. P4 — six write variants, one device each. **§9c is REFUTED.**
+
+| V | Method | `ToolsetLibrary` read | option read | native read | **ON DISK AFTER SAVE** |
+|---|---|---|---|---|---|
+| A | `set_object_properties` plain | changed | old | old | **absent** |
+| B | `modify()` then set | changed | old | old | **absent** |
+| C | set then `post_edit_change()` | changed | old | old | **absent** |
+| D | set, `bypass_container_check=YES` | **changed** | **changed** | old | **absent** |
+| E | `set_user_option_value(None,…)` | old | old | old | **absent** (correct negative, returned False) |
+| F | **`set_editor_property('label_override', …)`** | old | **changed** | **changed** | **PRESENT, 4×** |
+
+**`ToolsetLibrary.set_object_properties` is not a write path in any variant.** It populates an
+in-memory property bag the serialiser ignores. After the save, A–D had all silently reverted to
+their original values.
+
+**Variant D is the most dangerous result in this project so far.** With
+`bypass_container_check=YES`, **two independent APIs agreed on the new value** —
+`ToolsetLibrary.get_object_properties` *and* `device.get_user_option_value()` — the Details-panel
+label visibly changed, and **it still did not persist.** Cross-API agreement was not enough.
+Only the disk was.
+
+**Variant F is the confirmed write path**, consistent with probe 6: write the native UPROPERTY,
+and the device-option view follows. The actor's displayed label became `MCP_P4_F` and the marker
+appears 4× in its saved `__ExternalActors__` `.uasset`.
+
+### 13f. Validation of the modified sandbox — CLEAN
+
+`validate_assets(directory="/Blank_Test_Project/", usecase="PRE_SUBMIT")` after the F write:
+**71 assets checked, 71 VALID, 0 invalid, 0 errors, 1 warning** — and that warning
+(`_Verse Asset $Digest has an invalid name`) pre-dates the write and is unrelated.
+
+**So the F recipe survives Epic's own pre-submit validators.** That is a necessary condition
+before it goes near The Scar, not a sufficient one — validation is not the publish gate (§2/A11).
+
+Fixed while doing this: `validate_assets` was returning `"VALID: 1>"` as its result state,
+because `str(enum)` is `"<DataValidationResult.VALID: 1>"` and only the last `.` was stripped.
+Every `== "VALID"` comparison a caller made would have failed. Now returns `"VALID"`.
+
+### 13g. What this means for the tool surface
+
+- **Add `set_device_option` / `set_island_setting` built on `set_editor_property`**, resolving the
+  option name to its native property (`LabelOverride` → `label_override`). Confirmed path.
+- **Do NOT add anything built on `ToolsetLibrary.set_object_properties`.** Refuted four ways.
+- **Do NOT add a `.uefnproject` writer** for matchmaking settings (13d).
+- The name mapping (option → native) is the open question: `LabelOverride` → `label_override` and
+  `mms_player_count` are known; the general rule is UpperCamel → snake_case, unverified at scale.
