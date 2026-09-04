@@ -5,9 +5,9 @@ measured in a live UEFN editor on that date, not inferred from docs.
 
 ---
 
-## 0. TWO TRAPS THAT PRODUCE CONFIDENT FALSE PASSES
+## 0. TRAPS AND HARD RULES — READ BEFORE WRITING A PROBE
 
-Both were hit in this project. Both look like success. Read these before writing a probe.
+Every one of these was hit in this project. They all look like success.
 
 ### TRAP 1 - `set_object_properties` lies. Read-back through the writing API is NOT evidence.
 
@@ -26,12 +26,27 @@ will report a working write path that does not exist.
 
 **Rule: the writing API's own read-back is worth nothing. Disk is the only arbiter.**
 
-**And it is worse than that.** With `bypass_container_check=YES` (§13e variant D), *two
-independent APIs agreed* on the new value — `ToolsetLibrary.get_object_properties` **and**
-`device.get_user_option_value()` — the label visibly changed in the editor, and it **still**
-did not survive the save. **Cross-API agreement is not evidence either. Only the bytes on
-disk are.**
+**The write path that DOES work:** `actor.set_editor_property(<native name>, value)` then save.
+See §2b and the `set_device_option` tool.
 Save, then grep the `.uasset` under `__ExternalActors__`. Verified 2026-09-04 - see §11 P4.
+
+### TRAP 1b - EVEN TWO APIs AGREEING IS NOT EVIDENCE
+
+The worst case measured in this project. `ToolsetLibrary.set_object_properties` with
+`bypass_container_check=YES` (§13e, variant D):
+
+| What you check | What it says |
+|---|---|
+| the return value | **`True`** |
+| read back via `ToolsetLibrary.get_object_properties` | **changed** |
+| read back via `device.get_user_option_value()` | **changed** |
+| the label shown in the editor | **visibly changed** |
+| **the saved `.uasset` after save** | **UNCHANGED - the value silently reverted** |
+
+Two independent APIs agreed, and the editor UI agreed, and it still did not persist.
+
+**Rule: cross-API agreement is not evidence. A visible editor change is not evidence.
+Save, then grep the `.uasset`.**
 
 ### TRAP 2 - a dropped screenshot task cancels the capture silently
 
@@ -43,7 +58,31 @@ The listener keeps every task in `unreal._mcp_screenshot_tasks` for exactly this
 **A future cleanup that deletes that registry as a pointless variable will silently break all
 screenshots.** It is load-bearing. See `_screenshot_tasks()` in `uefn_listener.py`.
 
-### The general form of both
+### TRAP 3 - the `.uefnproject` is an OUTPUT, not an input
+
+**Do not build a `.uefnproject` writer.** Two independent reasons, both measured:
+
+1. **UEFN rewrites `*.uefnproject` while the editor is open** - an edit made with UEFN running was
+   overwritten **97 milliseconds later**. Project-file edits only stick with the editor **fully
+   closed**.
+2. **It is generated from actor state anyway.** The direction of authority is:
+
+   `native UPROPERTY` -> `device-option view` -> saved `.uasset` -> `.uefnproject`
+
+   Writing the Island Settings actor and saving rewrote `maxPlayers`, `maxSocialPartySize`,
+   `maxTeamCount` and `maxTeamSize` in the project file by itself (§13d).
+
+**Write the actor, not the file.**
+
+### ENVIRONMENT RULE - Python is PER-PROJECT
+
+Gated by `dataSets.experimental.pythonExperimental.bEnablePythonForProject` in the
+`.uefnproject`. Without it **Tools -> Execute Python Script does not exist** and the listener
+cannot start. The Tools menu's "Enable Python" checkbox does **not** persist it - it must be added
+to the file by hand, **with the editor closed** (see Trap 3). Any new sandbox project needs this
+step first.
+
+### The general form of all of these
 
 Both traps share one shape: **the call reports success and something reads back correct, while
 the thing you actually wanted never happened.** This is what `CLAUDE.md`'s "verify behaviourally,
@@ -85,7 +124,19 @@ Measured by calling the live editor. Trust these over any web-sourced API list.
 | **Subsystems generally** | 208 `*Subsystem` classes exposed, incl. `SubobjectDataSubsystem`, `EditorUtilitySubsystem`, `LayersSubsystem`, `ContentBrowserDataSubsystem`, `WorldPartitionSubsystem`, `DataLayerEditorSubsystem`, `AssetEditorSubsystem` | |
 | **UEFN-specific** | `FabricIslandSettingsWorldSubsystem`, `FabricGlobalVariablesSubsystem`, `FortExposedAssetSubsystem`, `FortGlobalActorRegistrySubsystem`, `RealTimeThumbnailSubsystem` | unexplored, likely valuable |
 
-### 2b. DEVICE OPTIONS — read yes, write no (CLAUDE.md §4 is CORRECT here)
+### 2b. DEVICE OPTIONS — **SOLVED 2026-09-04. Read AND write.**
+
+> **THE RECIPE:** write the **native UPROPERTY** behind the option with
+> `actor.set_editor_property(native_name, value)`, then **save the level**. The device-option
+> layer is a *view* over native properties, so the option, the Details panel, the saved
+> `.uasset` and (for Island Settings) the `.uefnproject` all follow. Shipped as the
+> **`set_device_option`** tool. 92% of options map to a native property; the rest are
+> function-style events with nothing to write. Full evidence in §13d/§13e/§13h.
+>
+> **Do NOT use `ToolsetLibrary.set_object_properties`** — refuted four ways (§13e).
+
+The original 2026-09-04 finding is kept below for the record. Its reading half is still
+correct; its writing half is **wrong** and is struck through.
 
 `TheScar\CLAUDE.md` §4 already states this precisely: readable via `get_user_option_values()`,
 not writable. **The probe confirms §4 exactly — do not distrust that doc.** (An earlier note in
@@ -107,10 +158,15 @@ Reading a `Device_Barrier_V2_Placed_C` returned **all 23 options with real value
 `ZoneShape=Box`, `LabelOverride=TrophyBarrier_W`, plus function-style options
 (`Enable`, `Disable`, `AddPlayerToIgnoreList`, …).
 
-**Writing is genuinely blocked.** `set_user_option_value` takes a `PlayerController` as arg 1;
-passing `None` returns `False` — no exception, no write. The `ToyOptionsComponent` exposes
-**zero** data properties to Python, and the option values are **not** mirrored in any native
-UPROPERTY on the actor. Finding a write path is the hardest open problem in this project.
+~~**Writing is genuinely blocked.**~~ **WRONG — corrected §13.** `set_user_option_value` does
+take a `PlayerController` and does no-op with `None`, and the `ToyOptionsComponent` does expose no
+data properties. But the conclusion drawn from that was false: **the option values ARE mirrored in
+native UPROPERTYs on the actor** — `LabelOverride` → `label_override`, `Matchmaking_MaxPlayersPerSession`
+→ `mms_player_count`, and so on for 529 of 572 measured options. That mirror is the write path.
+
+This sentence is the exact claim that kept the problem open, so it is left visible rather than
+deleted: *"the option values are not mirrored in any native UPROPERTY on the actor"* was inferred
+from `ToyOptionsComponent` having no properties, without checking the **actor** itself.
 
 ### 2c. ~~CONFIRMED BLOCKED~~ — SUPERSEDED BY §11 (P2). The Verse claim below is WRONG.
 
@@ -296,7 +352,7 @@ refs resolved to `{"refPath": "…__verse_0x2DD0D81D_EliminationManager"}`.
 **`DeviceToolset` is Verse-device-only.** Passing a Creative device is rejected with
 `Cannot nativize 'FortCreativeDeviceProp' as 'Device'`.
 
-### 9c. §2b's "write path unknown" — a CANDIDATE, **NOT CONFIRMED**
+### 9c. §2b's "write path unknown" — **REFUTED. The real answer is in §13e (variant F).**
 
 > **STATUS 2026-09-04: REFUTED. Do not build on this.** Probe P4 was run four ways in a
 > sandbox (§13e) — plain, with `modify()`, with `post_edit_change()`, and with

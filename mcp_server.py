@@ -781,12 +781,13 @@ def get_device_options(actor_path: str) -> str:
     This exposes the device's Details-panel settings - the things a creator
     would normally click through in the UEFN UI.
 
-    Two limits, both measured rather than assumed:
-      - Options are READ-ONLY here. No proven write path exists yet, so no
-        write tool is offered rather than one that silently does nothing.
-      - This API does not surface Verse @editable values; a VerseDevice
-        returns only its three base Creative options. They ARE readable by a
-        different route (DeviceToolset.GetDeviceProperties), just not here.
+    To CHANGE any of these, use set_device_option - options are writable via
+    the native property behind them, verified on disk.
+
+    One limit, measured rather than assumed: this API does not surface Verse
+    @editable values; a VerseDevice returns only its three base Creative
+    options. They ARE readable by a different route
+    (DeviceToolset.GetDeviceProperties), just not here.
 
     Args:
         actor_path: Full path, label, or name of the device actor.
