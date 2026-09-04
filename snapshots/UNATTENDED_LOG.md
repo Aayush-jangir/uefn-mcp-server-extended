@@ -21,7 +21,7 @@ accurate at any moment the session might end.
 | 3 | Result shaping | **DONE, pushed** |
 | 4 | Discovery triad | **DONE, pushed** |
 | 5 | Sidecar tools | **PARTIAL** — raycast/find_actors/batch shipped; reflect, dump_object, job_status deferred |
-| 6 | `--supported-only` fallback | not started |
+| 6 | `--supported-only` fallback | **DONE, pushed** |
 | 7 | Drift check (no editor needed) | **DONE, pushed** |
 | 8 | Docs + draft upstream PR (no editor needed) | IN PROGRESS |
 
@@ -134,3 +134,11 @@ accurate at any moment the session might end.
   0/99 because the API returns lower-camel (`auraRefreshSeconds`) while the
   source declares PascalCase (`AuraRefreshSeconds`). A tidy-looking all-zero
   result that was entirely a matching bug. Beginning item 8.
+- **19:40** — **Item 6 DONE.** `--supported-only` fallback mode. Disables the
+  six reflection-backed commands (the triad + the two Verse tools + reindex)
+  while every documented `unreal.*` tool and `execute_python` keeps working.
+  Enabled by `UEFN_MCP_SUPPORTED_ONLY=1`, by the `supported_only` tool, or
+  **automatically when the capability manifest reports losses** — so a broken
+  build degrades on its own with nobody present. Verified live: with it on,
+  `ue_tools_search` refuses with a clear message while `find_actors` still
+  works; turning it off restores 19 search matches.

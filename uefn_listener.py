@@ -202,6 +202,7 @@ def _dispatch(command: str, params: dict) -> dict:
     handler = _HANDLERS.get(command)
     if handler is None:
         raise ValueError(f"Unknown command: {command}. Available: {list(_HANDLERS.keys())}")
+    _assert_supported(command)
     return handler(**params)
 
 
@@ -1027,6 +1028,12 @@ def _manifest_startup_check() -> None:
             for item in diff["lost"][:10]:
                 _log("  LOST: %s (was %r, now %r)"
                      % (item["key"], item["was"], item["now"]), "error")
+            # Degrade rather than fail: nobody may be present to notice.
+            _set_supported_only(
+                True,
+                "auto-enabled: capability manifest reports %d lost entry point(s)."
+                % len(diff["lost"]),
+            )
         elif diff["gained"] or diff["changed"]:
             _log("Capability manifest: no losses; %d gained, %d changed"
                  % (len(diff["gained"]), len(diff["changed"])))
@@ -1160,6 +1167,70 @@ def _cmd_denylist() -> dict:
         "not_enforced_for": (
             "execute_python - the deliberate escape hatch; a denylist there "
             "would be theatre since arbitrary Python reaches the same symbols"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# --supported-only FALLBACK MODE  (IMPLEMENTATION_PLAN.md section 7)
+#
+# Everything clever here rides on reflection paths Epic has not allow-listed.
+# When a version bump breaks them, the failure mode should be "the reflection
+# tools are off, the documented ones still work" - not "the bridge is dead".
+#
+# Enable with the env var UEFN_MCP_SUPPORTED_ONLY=1, or
+# start_listener(supported_only=True). It also turns itself ON automatically
+# when the capability manifest reports losses, so a broken build degrades
+# without anyone being present to notice.
+# ---------------------------------------------------------------------------
+
+# Commands that depend on un-allow-listed reflection. Everything NOT in here
+# uses documented unreal.* APIs and keeps working in fallback mode.
+_REFLECTION_DEPENDENT = {
+    "ue_tools_search", "ue_tool_describe", "ue_tool_call", "ue_tools_reindex",
+    "get_verse_editables", "set_verse_editable",
+}
+
+
+def _supported_only() -> bool:
+    return bool(getattr(unreal, "_mcp_supported_only", False))
+
+
+def _set_supported_only(on: bool, reason: str = "") -> None:
+    unreal._mcp_supported_only = bool(on)
+    unreal._mcp_supported_only_reason = reason
+    if on:
+        _log("SUPPORTED-ONLY MODE ON - reflection-backed tools disabled. %s"
+             % (reason or ""), "warning")
+    else:
+        _log("Supported-only mode off - full tool surface available")
+
+
+def _assert_supported(command: str) -> None:
+    if _supported_only() and command in _REFLECTION_DEPENDENT:
+        raise DeniedByPolicy(
+            "'%s' is disabled: the listener is in --supported-only mode. %s "
+            "Documented unreal.* tools and execute_python still work; "
+            "execute_python can still reach the same symbols manually if you "
+            "know what you are doing. Call supported_only(enable=false) to "
+            "force it back on."
+            % (command, getattr(unreal, "_mcp_supported_only_reason", "") or "")
+        )
+
+
+@_register("supported_only")
+def _cmd_supported_only(enable: Optional[bool] = None) -> dict:
+    """Read or set --supported-only fallback mode."""
+    if enable is not None:
+        _set_supported_only(bool(enable), "set manually")
+    return {
+        "supported_only": _supported_only(),
+        "reason": getattr(unreal, "_mcp_supported_only_reason", "") or None,
+        "disabled_commands": sorted(_REFLECTION_DEPENDENT) if _supported_only() else [],
+        "still_available": (
+            "every documented unreal.* tool plus execute_python - actors, "
+            "assets, levels, viewport, screenshots, console, validation, "
+            "native-property device writes"
         ),
     }
 
@@ -2814,6 +2885,9 @@ def start_listener(port: int = 0, show_status: bool = True) -> int:
         unreal._mcp_tick_handle = unreal.register_slate_post_tick_callback(_tick_handler)
 
     _metrics["started_at"] = time.time()
+
+    if os.environ.get("UEFN_MCP_SUPPORTED_ONLY", "").strip() in ("1", "true", "TRUE"):
+        _set_supported_only(True, "UEFN_MCP_SUPPORTED_ONLY env var set")
 
     _log(f"Listener started on http://127.0.0.1:{port}")
     _log(f"Registered {len(_HANDLERS)} command handlers")

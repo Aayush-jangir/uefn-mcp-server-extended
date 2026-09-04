@@ -1114,6 +1114,27 @@ def batch(
     return json.dumps(result, indent=2)
 
 
+@mcp.tool()
+def supported_only(enable: Optional[bool] = None) -> str:
+    """Read or set fallback mode, which disables the reflection-backed tools.
+
+    Most of this server's advanced capability rides on reflection paths Epic
+    has not officially allow-listed, and a Fortnite version bump can remove
+    them. In fallback mode those tools refuse cleanly and everything built on
+    documented APIs keeps working, so a broken build degrades instead of dying.
+
+    It turns itself on automatically if the capability manifest reports losses.
+
+    Args:
+        enable: true to force fallback on, false to force it off. Omit to read.
+    """
+    params: dict[str, Any] = {}
+    if enable is not None:
+        params["enable"] = enable
+    result = _send_command("supported_only", params)
+    return json.dumps(result, indent=2)
+
+
 # ---------------------------------------------------------------------------
 # read_log / read_crashes - off disk, in THIS process
 #
