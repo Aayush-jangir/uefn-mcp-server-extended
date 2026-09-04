@@ -30,33 +30,33 @@ All eight items touched, seven complete. **48 MCP tools / 50 listener handlers**
 
 ---
 
-## READ THIS FIRST — the seam in tonight's work
+## THE SEAM IS CLOSED — verified 2026-09-05
 
-**Everything built tonight was verified as HOT-PATCHED code, not as a fresh load.** The
-listener has been running since before this session and I patched new handlers into its
-live namespace. I did not restart it: re-executing the file unregisters the tick callback
-from inside itself, and with nobody present to restart a crashed editor that was not a
-trade worth taking.
+The overnight work was all hot-patched, and this section used to say so and ask for a
+cold-start check. **Aayush restarted the listener and it has now been verified from the
+committed file.**
 
-What I did instead, and it is not nothing: I exec'd the **entire committed file** into an
-isolated throwaway namespace, with the auto-start block sliced off so it could not touch
-the running listener. It loaded cleanly and defined all **50 handlers** with no ordering
-errors. So the file is internally consistent.
+- Listener probed for `_is_device` — a symbol that only ever existed in the hot-patched
+  namespace. **Absent.** Verdict: **FRESH FROM DISK**.
+- **50 handlers**, and all eight new commands present (`denylist`, `capability_manifest`,
+  `ue_tool_call`, `raycast`, `batch`, `find_actors`, `supported_only`, `set_verse_editable`).
+- Independently exercised since the restart: a real Verse compile driven through the bridge
+  (`1 packages compiled in 1079.0 ms, SUCCESS`), plus read-only device and project reads.
 
-**What that does NOT prove:** that it starts a listener correctly from cold. The honest
-test is still the one from earlier today — restart the listener from disk and re-run a
-write end-to-end. **That is the first thing to do when you are back.**
+**Everything in this log is now shipped code, not session state.**
 
-## Needs Aayush
+## Needs Aayush — current, 2026-09-05
 
-1. **Restart the listener from disk and re-verify** — see the seam above. One command in
-   UEFN, then any `set_device_option` write + disk grep.
-2. **The Scar is at "ready to publish" and untouched since.** Lore check-in and the private
-   version are yours. Nothing tonight went near it except reads.
-3. **`DRAFT_PR.md` is written and NOT submitted.** Four open decisions at the bottom of it.
-4. **`snapshots/p14_probe.verse` equivalent is still in Blank_Test_Project** —
-   `Content/p14_probe.verse` plus the placed `p14 probe device` actor. Harmless, disposable,
-   delete whenever.
+1. **Lore check-in**, then **publish the private version** of TheScar and playtest it.
+   That private version IS the real P15 gate — build/cook/validation/upload on the actual
+   target, with Lore as the undo.
+2. **The cold join from Discover** (design Phase 0d). Sits on 244 of the 252 missing clicks
+   and no in-island device can ever see it.
+3. Optional, whenever: `DRAFT_PR.md` decisions; deleting the sandbox's `p14_probe.verse` and
+   its placed actor.
+
+**Retired since the overnight run:** the cold-start verification (done, above) and the
+Ecosystem poller (built elsewhere by Aayush).
 
 ## What broke, and what I stopped on
 
@@ -82,15 +82,17 @@ write end-to-end. **That is the first thing to do when you are back.**
 - **`dump_object`, `job_status`.** Time. Neither is blocking anything.
 - **PIE anything.** Standing decision.
 
-## What I would do next, in order
+## What I would do next, in order — revised 2026-09-05
 
-1. **Restart the listener and re-verify** (above). Until then tonight's work is
-   "works in my session", not "shipped" — the exact distinction you made this morning.
-2. **Drive one write tool through `ue_tool_call`** and add it to the write allow-list. The
-   allow-list ships empty, so the write half of the triad is **built but never exercised**.
-   That is the biggest untested surface here.
+1. **Nothing that does not need Aayush's hands.** Publishing, the private version, the
+   playtest and the cold join are all his. Said plainly rather than inventing work.
+2. When there is something to exercise: **drive one write tool through `ue_tool_call`** and
+   record it in the write allow-list. That list ships EMPTY, so the write half of the triad
+   is **built but never exercised** — still the biggest untested surface here. Do it in a
+   throwaway project, never on TheScar.
 3. **`reflect`, designed safely** — hard cap, no recursion, never call a listed member.
-4. Decide the `DRAFT_PR.md` questions if upstream contribution is wanted.
+4. Instrumentation is **DEFERRED**, not forgotten — see `instrumentation-design.md`. The
+   trigger to revisit is the Ecosystem poller recording a non-zero `plays`.
 
 ## The one finding worth reading even if you skip everything else
 
@@ -241,3 +243,10 @@ misleading from then on. Worth deciding deliberately.
   all 50 handlers defined, no ordering errors. This proves the file is
   internally consistent; it does NOT prove it starts a listener from cold.
   See "the seam" at the top. Queue complete. Repo clean and pushed.
+- **2026-09-05** — **Session continued.** Shipped the opening-phase gate to TheScar
+  (`juggernaut_manager.verse`), verified by a real Verse compile through the bridge. Recorded
+  the tuning-location rule and closed the raycast dead end in `MCP_UPGRADE.md` §0. Corrected
+  `instrumentation-design.md` twice — an unsupported mechanism and a resolved Phase 0a — and
+  marked the whole instrument **DEFERRED** with reasoning. Corrected TheScar's pre-publish
+  debug-flag checklist, which claimed 2 flags when there are **10**. Closed the cold-start
+  seam above.

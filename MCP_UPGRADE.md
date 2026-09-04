@@ -5,6 +5,23 @@ measured in a live UEFN editor on that date, not inferred from docs.
 
 ---
 
+## CURRENT STATE — 2026-09-05
+
+**The bridge is done for now.** 48 MCP tools / 50 listener handlers, verified running from
+the committed file after a cold restart (not hot-patched — see `snapshots/UNATTENDED_LOG.md`).
+
+**What it was built for is delivered:** TheScar's matchmaking floor and the opening-phase
+gate were both written through it and verified on disk, and the island's 99 Verse
+`@editable`s are captured in `snapshots/`.
+
+**Known-untested surface:** `ue_tool_call`'s WRITE path. The allow-list ships empty by
+design, so no mutating engine tool has ever been dispatched through it. Exercise it in a
+throwaway project before trusting it.
+
+**Not scriptable, settled:** publishing (see the HARD RULE below). Those steps are human.
+
+---
+
 ## 0. TRAPS AND HARD RULES — READ BEFORE WRITING A PROBE
 
 Every one of these was hit in this project. They all look like success.
