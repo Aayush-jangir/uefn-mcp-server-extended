@@ -495,9 +495,20 @@ considered unreliable, and console `HighResShot` is the working fallback.
 ### Known pre-existing defect, not introduced here
 
 `get_editor_log` returns **stale** content — during this session it served lines ending
-37 minutes in the past, and its `filter_str` argument did not filter. Anything reasoning from
-that tool's output is reasoning from a stale snapshot. `IMPLEMENTATION_PLAN.md` §4 already plans
-to replace it with a disk reader in `mcp_server.py`; that is the fix.
+37 minutes in the past while the file on disk was current to the second, and its `filter_str`
+argument did not filter. Anything reasoning from that tool's output is reasoning from a stale
+snapshot.
+
+**FIXED, per `IMPLEMENTATION_PLAN.md` §4 — in `mcp_server.py`, NOT the listener.** New tools
+`read_log(lines, filter, level, since, cursor, log)` and `read_crashes(limit, context_lines)`
+read the `Saved\Logs` and `Saved\Crashes` trees directly from the MCP process. Zero
+game-thread cost, never stale, and they still work when the editor is hung or the listener is
+dead — which is exactly when the log matters. `cursor`/`next_cursor` give incremental polling.
+**The old `get_editor_log` handler is deliberately left untouched.**
+
+It paid for itself within a minute of existing: it produced the `Cmd: HighResShot` lines that
+settled **P10**, and the `LogClient: High resolution screenshot saved as …` timestamps that
+turned the screenshot guess above into an evidenced hypothesis.
 
 ### Hot-patching the running listener
 
