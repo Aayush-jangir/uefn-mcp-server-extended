@@ -1,0 +1,25 @@
+using { /Fortnite.com/Devices }
+using { /Verse.org/Simulation }
+
+# P14 probe device — exists only to test whether a Verse rebuild clobbers
+# native-path writes to a Verse device's @editable values. That is the one
+# gap left open by the P14 test in MCP_UPGRADE.md §14b, and it is the case
+# that matters for TheScar's nine VerseDevice_C managers.
+#
+# Safe to delete. Never copy this into TheScar.
+p14_probe_device := class(creative_device):
+
+    @editable
+    ProbeInt : int = 7
+
+    @editable
+    ProbeFloat : float = 1.5
+
+    @editable
+    ProbeString : string = "untouched"
+
+    @editable
+    ProbeBool : logic = false
+
+    OnBegin<override>()<suspends> : void =
+        Print("p14 probe: Int={ProbeInt} Float={ProbeFloat} String={ProbeString}")
