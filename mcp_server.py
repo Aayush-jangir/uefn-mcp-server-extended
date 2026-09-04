@@ -963,6 +963,66 @@ def capability_manifest(save_baseline: bool = False) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Discovery triad over the engine's own 168 tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def ue_tools_search(query: str = "", limit: int = 15, toolset: str = "") -> str:
+    """Search the Unreal editor's own 168 built-in tools.
+
+    This is how you reach capability that has no dedicated tool here: UMG
+    widgets, Niagara systems, physics assets, gameplay tags, editor app
+    operations, Verse fields. The index is built once inside the editor and
+    answered from memory, so searching is free.
+
+    Start here, then ue_tool_describe the one you want, then ue_tool_call it.
+
+    Args:
+        query: Words to match against tool names and descriptions.
+        limit: Max results.
+        toolset: Restrict to one toolset, e.g. "Niagara" or "UMG".
+    """
+    result = _send_command(
+        "ue_tools_search", {"query": query, "limit": limit, "toolset": toolset}
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def ue_tool_describe(tool_id: str) -> str:
+    """Get the full input schema for one engine tool.
+
+    Args:
+        tool_id: Full id from ue_tools_search, or just the last segment if
+                 unambiguous.
+    """
+    result = _send_command("ue_tool_describe", {"tool_id": tool_id})
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def ue_tool_call(tool_id: str, args: Optional[dict] = None) -> str:
+    """Run one of the engine's built-in tools.
+
+    Two safety layers apply, both refusing here rather than at the engine:
+      - the denylist, which blocks anything that would kill the bridge or the
+        editor (PIE control, StopServer, disabling Python)
+      - allow-list-first for writes: read tools run freely, but a tool whose
+        name looks like a mutation is refused unless its id has been recorded
+        in the write allow-list after being driven deliberately once
+
+    Args:
+        tool_id: Full id from ue_tools_search.
+        args: Arguments matching the tool's inputSchema from ue_tool_describe.
+    """
+    result = _send_command(
+        "ue_tool_call", {"tool_id": tool_id, "args": args or {}}, timeout=120.0
+    )
+    return json.dumps(result, indent=2)
+
+
+# ---------------------------------------------------------------------------
 # read_log / read_crashes - off disk, in THIS process
 #
 # IMPLEMENTATION_PLAN.md section 4: log reading belongs here, not in the

@@ -19,8 +19,8 @@ accurate at any moment the session might end.
 | 1 | Denylist | **DONE, pushed** |
 | 2 | Capability manifest | **DONE, pushed** |
 | 3 | Result shaping | **DONE, pushed** |
-| 4 | Discovery triad | IN PROGRESS |
-| 5 | Sidecar tools | not started |
+| 4 | Discovery triad | **DONE, pushed** |
+| 5 | Sidecar tools | IN PROGRESS |
 | 6 | `--supported-only` fallback | not started |
 | 7 | Drift check (no editor needed) | not started |
 | 8 | Docs + draft upstream PR (no editor needed) | not started |
@@ -69,3 +69,15 @@ accurate at any moment the session might end.
   Added paging (`limit`/`offset`/`has_more`), a `by_class` histogram, and
   opt-in `detail`. Verified `detail=true`, `class_filter` and
   `get_selected_actors` all still work. Beginning item 4.
+- **18:05** — **Item 4 DONE.** Discovery triad live over all 168 engine tools.
+  **P2 settled:** `execute_tool(toolset_name, tool_name, json_input) ->`
+  `ToolCallAsyncResultString`, signature revealed by argument-name errors.
+  Index built once at 168 tools / 12 toolsets and answered from RAM.
+  Verified live, not assumed: search (`log` -> 19 matches, `gameplay tag` -> 7),
+  describe (full inputSchema for `LogsToolset.GetLogEntries`), and **real
+  dispatch** — `GetLogEntries` returned actual log lines in an 874-byte
+  payload. Both guards fire: `EditorAppToolset.StartPIE` refused by the
+  denylist, `EditorAppToolset.CreateCollection` refused as an unlisted WRITE
+  tool. Write allow-list seeded empty at
+  `snapshots/tool_write_allowlist.json` — reads run freely, writes must be
+  driven deliberately once and recorded. Beginning item 5.

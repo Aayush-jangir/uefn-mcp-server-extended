@@ -1914,6 +1914,234 @@ def _cmd_set_device_option(
 
 
 # ---------------------------------------------------------------------------
+# DISCOVERY TRIAD  (IMPLEMENTATION_PLAN.md section 4)
+#
+# ue_tools_search / ue_tool_describe / ue_tool_call over the ToolsetRegistry
+# corpus: 470,110 bytes, 12 toolsets, 168 tools, each with a full inputSchema.
+#
+# Why a triad instead of 168 tool schemas: ~600 tokens of schema exposes all
+# 168 tools, and the index is built ONCE at listener start and answered from
+# RAM - no round trip per lookup, unlike Epic's describe_toolset.
+#
+# P2 settled 2026-09-04:
+#   ToolsetRegistry.execute_tool(toolset_name, tool_name, json_input)
+#       -> ToolCallAsyncResultString
+# ---------------------------------------------------------------------------
+
+_TOOL_INDEX_ATTR = "_mcp_tool_index"
+
+# Verbs that indicate a tool MUTATES something. Allow-list-first for writes:
+# reads run if not denied, writes must be recorded in the allow-list file
+# after being driven deliberately once.
+_WRITE_VERBS = (
+    "set", "create", "delete", "add", "remove", "update", "import", "export",
+    "rename", "move", "apply", "assign", "compile", "build", "save", "write",
+    "insert", "duplicate", "clear", "reset", "start", "stop", "enable",
+    "disable", "register", "unregister", "fixup", "convert", "generate",
+)
+
+_WRITE_ALLOWLIST_PATH = (
+    r"G:/UEFN/uefn-mcp-server-extended/snapshots/tool_write_allowlist.json"
+)
+
+
+def _build_tool_index() -> dict:
+    """Index the whole schema corpus once. Named API call, not a sweep."""
+    blob = unreal.ToolsetRegistry.get_all_toolset_json_schemas()
+    data = json.loads(blob)
+    idx = {}
+    for ts in data:
+        ts_name = ts.get("name", "?")
+        for t in ts.get("tools", []) or []:
+            tid = t.get("name") or ""
+            if not tid:
+                continue
+            idx[tid] = {
+                "id": tid,
+                "toolset": ts_name,
+                "leaf": tid.rsplit(".", 1)[-1],
+                "description": (t.get("description") or "").strip(),
+                "inputSchema": t.get("inputSchema") or {},
+            }
+    return idx
+
+
+def _tool_index(rebuild: bool = False) -> dict:
+    idx = getattr(unreal, _TOOL_INDEX_ATTR, None)
+    if idx is None or rebuild:
+        idx = _build_tool_index()
+        setattr(unreal, _TOOL_INDEX_ATTR, idx)
+    return idx
+
+
+def _is_write_tool(entry: dict) -> bool:
+    leaf = entry["leaf"].lower()
+    for verb in _WRITE_VERBS:
+        if leaf.startswith(verb):
+            return True
+    return False
+
+
+def _load_write_allowlist() -> dict:
+    try:
+        with io.open(_WRITE_ALLOWLIST_PATH, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {"allowed": [], "note": "no allow-list file yet"}
+
+
+@_register("ue_tools_search")
+def _cmd_ue_tools_search(query: str = "", limit: int = 15, toolset: str = "") -> dict:
+    """Search the 168 engine tools by name and description. Answers from RAM."""
+    idx = _tool_index()
+    q = (query or "").lower().strip()
+    terms = [t for t in q.split() if t]
+
+    hits = []
+    for entry in idx.values():
+        if toolset and toolset.lower() not in entry["toolset"].lower():
+            continue
+        hay_id = entry["id"].lower()
+        hay_desc = entry["description"].lower()
+        if not terms:
+            score = 0
+        else:
+            score = 0
+            for t in terms:
+                if t in entry["leaf"].lower():
+                    score += 10
+                elif t in hay_id:
+                    score += 6
+                if t in hay_desc:
+                    score += 2
+            if score == 0:
+                continue
+        hits.append((score, entry))
+
+    hits.sort(key=lambda kv: (-kv[0], kv[1]["id"]))
+    page = hits[: max(1, limit)]
+
+    return {
+        "query": query,
+        "indexed_tools": len(idx),
+        "matches": len(hits),
+        "returned": len(page),
+        "results": [
+            {
+                "id": e["id"],
+                "writes": _is_write_tool(e),
+                "description": (e["description"].splitlines() or [""])[0][:140],
+            }
+            for _, e in page
+        ],
+        "note": "call ue_tool_describe for the full inputSchema of one tool",
+    }
+
+
+@_register("ue_tool_describe")
+def _cmd_ue_tool_describe(tool_id: str) -> dict:
+    """Return one tool's full inputSchema."""
+    idx = _tool_index()
+    entry = idx.get(tool_id)
+    if entry is None:
+        matches = [k for k in idx if k.lower().endswith("." + tool_id.lower())]
+        if len(matches) == 1:
+            entry = idx[matches[0]]
+        elif matches:
+            raise ValueError(
+                "Ambiguous tool id %r - matches: %s" % (tool_id, ", ".join(matches[:8]))
+            )
+        else:
+            raise ValueError(
+                "Unknown tool id %r. Use ue_tools_search to find it." % tool_id
+            )
+
+    return {
+        "id": entry["id"],
+        "toolset": entry["toolset"],
+        "writes": _is_write_tool(entry),
+        "description": entry["description"],
+        "inputSchema": entry["inputSchema"],
+    }
+
+
+@_register("ue_tool_call")
+def _cmd_ue_tool_call(tool_id: str, args: Optional[dict] = None) -> dict:
+    """Dispatch one engine tool by id, through the denylist and write allow-list.
+
+    Reads run if not denied. Writes additionally require the tool id to be in
+    snapshots/tool_write_allowlist.json - allow-list-first, so a mutating tool
+    nobody has driven deliberately cannot be fired by accident.
+    """
+    _assert_tool_allowed(tool_id)
+
+    idx = _tool_index()
+    entry = idx.get(tool_id)
+    if entry is None:
+        matches = [k for k in idx if k.lower().endswith("." + tool_id.lower())]
+        if len(matches) == 1:
+            entry = idx[matches[0]]
+        else:
+            raise ValueError(
+                "Unknown tool id %r. Use ue_tools_search to find it." % tool_id
+            )
+
+    _assert_tool_allowed(entry["id"])
+
+    if _is_write_tool(entry):
+        allowed = set(_load_write_allowlist().get("allowed", []))
+        if entry["id"] not in allowed:
+            raise DeniedByPolicy(
+                "'%s' looks like a WRITE tool (leaf verb %r) and is not in the "
+                "write allow-list. Allow-list-first: drive it deliberately once, "
+                "confirm what it does, then add its id to %s. Reads need no "
+                "allow-listing."
+                % (entry["id"], entry["leaf"], _WRITE_ALLOWLIST_PATH)
+            )
+
+    toolset_name = entry["toolset"]
+    tool_name = entry["leaf"]
+    payload = json.dumps(args or {})
+
+    raw = unreal.ToolsetRegistry.execute_tool(toolset_name, tool_name, payload)
+
+    out = {
+        "id": entry["id"],
+        "toolset": toolset_name,
+        "tool": tool_name,
+        "args": args or {},
+        "writes": _is_write_tool(entry),
+    }
+
+    # execute_tool returns ToolCallAsyncResultString - surface it honestly
+    # rather than pretending it is a finished value.
+    text = None
+    for attr in ("result", "get_result", "value"):
+        if hasattr(raw, attr):
+            got = getattr(raw, attr)
+            text = got() if callable(got) else got
+            break
+    if text is None:
+        text = raw
+    out["result_type"] = type(raw).__name__
+    try:
+        out["result"] = json.loads(text) if isinstance(text, str) else _serialize(text)
+    except Exception:
+        out["result"] = str(text)[:4000]
+    return out
+
+
+@_register("ue_tools_reindex")
+def _cmd_ue_tools_reindex() -> dict:
+    """Rebuild the tool index from the live registry."""
+    idx = _tool_index(rebuild=True)
+    by_ts = {}
+    for e in idx.values():
+        by_ts[e["toolset"]] = by_ts.get(e["toolset"], 0) + 1
+    return {"indexed_tools": len(idx), "by_toolset": dict(sorted(by_ts.items()))}
+
+
+# ---------------------------------------------------------------------------
 # HTTP Server
 # ---------------------------------------------------------------------------
 

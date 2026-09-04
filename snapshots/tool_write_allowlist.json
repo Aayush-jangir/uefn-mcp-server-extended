@@ -1,0 +1,4 @@
+{
+  "note": "Allow-list-first for ue_tool_call. A tool whose leaf verb looks like a mutation is refused unless its id appears here. Add an id only after driving it deliberately once and confirming what it does - and prefer proving it on a throwaway project, never on TheScar.",
+  "allowed": []
+}
