@@ -82,6 +82,17 @@ cannot start. The Tools menu's "Enable Python" checkbox does **not** persist it 
 to the file by hand, **with the editor closed** (see Trap 3). Any new sandbox project needs this
 step first.
 
+### HARD RULE - TWO write paths, and they do NOT cross over
+
+- **Creative device** option (`Device_*`, Island Settings) -> write the **native UPROPERTY**
+  (`set_editor_property`, or the `set_device_option` tool).
+- **Verse device** `@editable` (`VerseDevice_C`) -> **`DeviceToolset.SetDeviceProperty`**, with a
+  **JSON-encoded** value. `'99'`, `'true'`, `'"a string"'` - a **bare** string is silently
+  discarded and the call still returns `None`.
+
+Verse `@editable`s are **not** native properties, so `set_device_option` does nothing at all on a
+Verse device. Full evidence in section 15.
+
 ### HARD RULE - publishing is NOT scriptable from this bridge
 
 Checked properly on 2026-09-04, so the next session does not repeat the search:
@@ -864,3 +875,105 @@ Rationale: at ~63 clicks/day split across regions, a two-stranger queue bar is r
 **Sequence when P15 clears: Lore check-in FIRST, then write both via `set_device_option`, save,
 verify on disk, change NOTHING else, and stop at "ready to publish."** Any second change in the
 same release makes the clicks-to-plays before/after uninterpretable.
+
+## 15. P14 CLOSED + P5 CONFIRMED — 2026-09-04
+
+### 15a. THE HEADLINE: there are TWO write paths, for two kinds of device
+
+This is the most important operational fact in this document. Getting it wrong means writing
+into a void and reporting success.
+
+| Device kind | What you write | How |
+|---|---|---|
+| **Creative device** (`Device_*`, Island Settings, spawners) | Creative options | **native UPROPERTY** via `set_editor_property` / the `set_device_option` tool |
+| **Verse device** (`VerseDevice_C`) | Verse `@editable`s | **`DeviceToolset.SetDeviceProperty`** with a **JSON-encoded** value |
+
+**They do not cross over.** Verse `@editable`s are **not** native properties on the actor —
+`ProbeInt`, `probe_int`, `probeint`, `ProbeString`, `probe_string`, `probestring` were **all
+ABSENT** via `get_editor_property`. So **`set_device_option` cannot write a Verse `@editable`**,
+and pointing it at one of TheScar's nine managers would do nothing at all.
+
+### 15b. P5 — `DeviceToolset.SetDeviceProperty` **CONFIRMED**
+
+Signature revealed by the argument-name errors, not guessed:
+`SetDeviceProperty(device, property_name, value)`.
+
+**The value must be JSON-encoded.** This is the whole trick, and it fails silently otherwise:
+
+| Written as | Result |
+|---|---|
+| `'99'` (int) | **took** → 99 |
+| `'true'` (bool) | **took** → true |
+| `'P14_VERSE_WRITE'` (bare string) | **SILENTLY IGNORED** — value unchanged, no error |
+| `'"P14_VERSE_WRITE"'` (JSON-quoted) | **took** → "P14_VERSE_WRITE" |
+
+**All four calls returned `None`.** The return value carries **zero** signal — exactly as §3 P5
+predicted. A bare string is not valid JSON, so it is discarded without complaint. Write a string
+unquoted and you get a silent no-op; trust the return value and you report a success that never
+happened.
+
+Verified on disk: `P14_VERSE_WRITE` present 2× in the device's `__ExternalActors__` `.uasset`,
+`untouched` gone. Overrides serialise under mangled names `__verse_0xCF9EF923_ProbeInt`,
+`__verse_0xB084D5C3_ProbeString`, `__verse_0x249DA10E_ProbeBool`. `ProbeFloat`, never written,
+has **no** mangled entry — only overridden values are serialised.
+
+### 15c. P14 — Verse rebuild survival. **PASSES**
+
+The residual left open in §14b was the case that actually matters for TheScar: a **Verse device
+whose own `@editable`s** are rewritten, then rebuilt.
+
+Method: place the probe device, write three `@editable`s across types, save, verify on disk, then
+change **only the `Print` body** in `p14_probe.verse` — never the `@editable` defaults — and force
+a rebuild. Confirmed genuine, not a no-op:
+**`Global Verse compile (incremental, 1 packages compiled in 1092.6 ms) finished: SUCCESS`.**
+
+After the rebuild:
+
+| Check | Result |
+|---|---|
+| `DeviceToolset.GetDeviceProperties` | `ProbeInt: 99, ProbeFloat: 1.5, ProbeString: "P14_VERSE_WRITE", ProbeBool: true` |
+| disk (`.uasset`) | `P14_VERSE_WRITE` **PRESENT 2×**, `untouched` **ABSENT** |
+| mangled field names | **unchanged** |
+
+**A Verse rebuild does not clobber `@editable` overrides.**
+
+**Residual, stated rather than buried:** the mangled name hashes the fully-qualified Verse path.
+This test changed only a function body, so every path was stable. **A rebuild that RENAMES an
+`@editable`, renames the class, or moves it between modules will change the hash, and an override
+keyed to the old hash has nothing to attach to.** Untested; assume dangerous. Rebuilds that only
+change code bodies are proven safe.
+
+Note also: a no-op compile happened **three times** during this test
+(`No packages found requiring compilation`) before a real one landed. A `sed -i` edit did not
+trigger the file watcher; a full file rewrite did, and even then the compile lands seconds later.
+**Always read back the "N packages compiled" line before believing a rebuild test.**
+
+### 15d. P15 on the sandbox — **NOT RUN** (not failed)
+
+`Blank_Test_Project` has no reachable publish flow — very likely never configured for release, and
+the menu hunt cost more than the test was worth. **Recorded as NOT RUN for that reason.** It is
+not evidence in either direction.
+
+The real publish gate is a private version of **TheScar**, created by Aayush in the normal way and
+playtested, with Lore as the undo. That tests the same pipeline on the actual target. See §0's
+publish rule for what a private version does and does not prove.
+
+### 15e. Reproducible recipe: enabling Python in a fresh sandbox project
+
+Confirmed working — `Execute Python Script` now appears in `Blank_Test_Project`'s Tools menu.
+
+1. **Close UEFN completely.** The editor rewrites `*.uefnproject` within ~100 ms while open
+   (§0 Trap 3), so an edit made with it running is discarded.
+2. Edit `<Project>/<Project>.uefnproject` and add, inside `dataSets`:
+
+   ```json
+   "experimental": {
+     "version": 1,
+     "pythonExperimental": { "bEnablePythonForProject": true }
+   }
+   ```
+3. Reopen the project. **Tools → Execute Python Script** now exists.
+4. Run `G:\UEFN\uefn-mcp-server-extended\uefn_listener.py` from that menu.
+
+The Tools menu's own "Enable Python" checkbox does **not** persist this — step 1 is the part
+people skip.
