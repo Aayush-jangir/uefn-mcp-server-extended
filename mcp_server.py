@@ -795,6 +795,45 @@ def get_device_options(actor_path: str) -> str:
     return json.dumps(result, indent=2)
 
 
+@mcp.tool()
+def set_device_option(
+    actor_path: str,
+    option: str,
+    value: Any,
+    save: bool = False,
+) -> str:
+    """Change a setting on a Fortnite Creative device.
+
+    This writes the settings a creator would otherwise click through in the
+    UEFN Details panel - a barrier's size, a button's interaction radius, an
+    island's player count.
+
+    It works by writing the native property behind the option. That is the
+    only route verified to actually persist: it was confirmed on disk for
+    string, float, int and bool values across five different devices, and for
+    Island Settings it even propagates out into the .uefnproject file.
+
+    Roughly 92% of device options are writable this way. The rest are
+    function-style options (events such as "Reset Progress"), which have no
+    value to set.
+
+    IMPORTANT: the change is in memory until the level is saved. Pass
+    save=True, or call save_current_level, or it dies with the editor.
+
+    Args:
+        actor_path: Path, label, or name of the device.
+        option: Option name exactly as get_device_options reports it.
+        value: The new value.
+        save: Save the level afterwards, making the change durable.
+    """
+    result = _send_command(
+        "set_device_option",
+        {"actor_path": actor_path, "option": option, "value": value, "save": save},
+        timeout=120.0,
+    )
+    return json.dumps(result, indent=2)
+
+
 # ---------------------------------------------------------------------------
 # read_log / read_crashes - off disk, in THIS process
 #

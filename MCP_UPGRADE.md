@@ -659,9 +659,49 @@ Every `== "VALID"` comparison a caller made would have failed. Now returns `"VAL
 
 ### 13g. What this means for the tool surface
 
-- **Add `set_device_option` / `set_island_setting` built on `set_editor_property`**, resolving the
-  option name to its native property (`LabelOverride` → `label_override`). Confirmed path.
+- **DONE — `set_device_option` ships, built on `set_editor_property`.** See 13h.
 - **Do NOT add anything built on `ToolsetLibrary.set_object_properties`.** Refuted four ways.
 - **Do NOT add a `.uefnproject` writer** for matchmaking settings (13d).
 - The name mapping (option → native) is the open question: `LabelOverride` → `label_override` and
   `mms_player_count` are known; the general rule is UpperCamel → snake_case, unverified at scale.
+
+### 13h. SHIPPED — `set_device_option`, the confirmed write path as a tool
+
+The mapping question in 13g is answered by measurement, not assumption. Resolving each option
+name to a native UPROPERTY with a small set of **named candidates** (snake_case, `b`-prefix
+stripped, lowercase, verbatim — never a reflection sweep):
+
+| Device | options | mapped | |
+|---|---|---|---|
+| Island Settings | 299 | 297 | 99% |
+| Item Granter / End Game | 31 / 26 | 31 / 26 | 100% |
+| Button ×5 | 18 | 17 | 94% |
+| Damage Volume / HUD Message / Tracker | 32 / 38 / 56 | 24 / 28 / 38 | 68–75% |
+| **TOTAL** | **572** | **529** | **92%** |
+
+The unmapped 8% is almost entirely **function-style options** — `On Player Entering Zone`,
+`Reset Progress`, `Assign to All` — which are events, not data, and correctly have nothing to
+write. The genuine data gap is small and consists of space-named options like `Interaction Text`.
+
+**Generalisation test — F is not a one-off.** Five options, five devices, four types, all
+**verified on disk** after save:
+
+| Device | Option | Wrote | On disk |
+|---|---|---|---|
+| Button | `InteractionRadius` (float) | 7.77 | `7.770000` PRESENT |
+| Button2 | `Delay` (float) | 3.33 | `3.330000` PRESENT |
+| Button3 | `TimesCanTrigger` (int) | 37 | `37` PRESENT |
+| Button4 | `InteractTime` (float) | 9.99 | `9.990000` PRESENT |
+| Button5 | `EnabledAtGameStart` (bool) | False | `False` PRESENT |
+
+**`set_device_option(actor_path, option, value, save=False)` now ships.** End-to-end check:
+writing `LabelOverride="SHIPPED_TOOL_TEST"` on the HUD Message device with `save=true` put the
+marker in the saved `.uasset` **4×**, and `validate_assets` still returns **71/71 VALID, 0
+errors**. It refuses function-style options with a message explaining why.
+
+`get_device_options` no longer reports `writable: False` — that is now wrong. It reports
+`writable_via: "set_device_option"` and names the refuted route so nobody rebuilds it.
+
+**Not yet proven, and deliberately not claimed:** that a write survives a *Verse rebuild*, or that
+UEFN's publish pipeline accepts an island authored this way (§3 P15). Validation is a pre-flight,
+never a publish guarantee.

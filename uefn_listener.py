@@ -13,6 +13,7 @@ import io
 import json
 import os
 import queue
+import re
 import socket
 import sys
 import threading
@@ -1162,13 +1163,136 @@ def _cmd_get_device_options(actor_path: str) -> dict:
         "kind": _device_kind(actor),
         "options": options,
         "count": len(options),
-        "writable": False,
-        "note": ("no PROVEN write path yet. set_user_option_value needs a "
+        "writable_via": "set_device_option (native UPROPERTY route, verified on disk)",
+        "note": ("options ARE writable via set_device_option, which writes the "
+                 "native UPROPERTY behind the option. NOT via ToolsetLibrary."
+                 "set_object_properties - that was refuted four ways, see "
+                 "MCP_UPGRADE.md 13e. Legacy note: set_user_option_value needs a "
                  "PlayerController and no-ops with None. ToolsetLibrary."
                  "set_object_properties returns True and reads back changed, "
                  "but get_user_option_value still returns the OLD value - the "
                  "two representations diverge, so that is not a working write. "
                  "See MCP_UPGRADE.md 9c / probe P3."),
+    }
+
+
+def _native_candidates(option_name: str) -> List[str]:
+    """Plausible native UPROPERTY names for a device option.
+
+    Named candidates only, tested with try/getattr - never a reflection sweep
+    (MCP_UPGRADE.md section 8). Measured coverage across 572 options on 11
+    sandbox devices: 529 resolved (92%). The unresolved remainder is almost
+    entirely function-style options ("On Player Entering Zone", "Reset
+    Progress") which are events, not data, and correctly have no property.
+    """
+    base = option_name.split(":")[-1].strip().replace(" ", "")
+    if not base:
+        return []
+
+    def snake(s: str) -> str:
+        s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", s)
+        s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
+        return s.lower()
+
+    out = [snake(base)]
+    if base[:1] == "b" and len(base) > 1 and base[1:2].isupper():
+        out.append(snake(base[1:]))          # bAllowX -> allow_x
+    out.append(base.lower())
+    out.append(base)
+
+    seen, uniq = set(), []
+    for c in out:
+        if c and c not in seen:
+            seen.add(c)
+            uniq.append(c)
+    return uniq
+
+
+def _resolve_native(actor, option_name: str) -> Optional[str]:
+    """The native property backing a device option, or None."""
+    for cand in _native_candidates(option_name):
+        try:
+            actor.get_editor_property(cand)
+            return cand
+        except Exception:
+            continue
+    return None
+
+
+@_register("set_device_option")
+def _cmd_set_device_option(
+    actor_path: str,
+    option: str,
+    value: Any,
+    save: bool = False,
+) -> dict:
+    """Write a Creative device option, via the native UPROPERTY behind it.
+
+    THIS IS THE CONFIRMED WRITE PATH (MCP_UPGRADE.md section 13e, variant F).
+    Verified on disk for str, float, int and bool across five devices.
+
+    Do NOT reimplement this with ToolsetLibrary.set_object_properties. That
+    call returns True, and with bypass_container_check=YES it even makes two
+    separate read APIs agree - and it still does not survive the save. It was
+    refuted four ways (section 13e, variants A-D).
+
+    The device-option layer is a VIEW over native properties, so writing the
+    native property updates the option, the Details panel, the saved .uasset,
+    and - for Island Settings - the .uefnproject too.
+
+    Args:
+        actor_path: Path, label, or name of the device.
+        option: Option name as get_device_options reports it, e.g. "LabelOverride".
+        value: New value. Types follow the native property.
+        save: Save the level afterwards. Only a save makes the change durable;
+              without it the write lives in memory and dies with the editor.
+    """
+    actor = _find_actor(actor_path)
+    options = _read_options(actor)
+    if options is None:
+        raise ValueError(
+            "%s (%s) is not a configurable device"
+            % (actor.get_actor_label(), actor.get_class().get_name())
+        )
+    if option not in options:
+        raise ValueError(
+            "No option %r on %s. Use get_device_options to list them."
+            % (option, actor.get_actor_label())
+        )
+
+    native = _resolve_native(actor, option)
+    if native is None:
+        raise ValueError(
+            "Option %r has no native property behind it, so it cannot be written. "
+            "Function-style options (events like 'Reset Progress') are read-only "
+            "by nature." % option
+        )
+
+    before_option = str(actor.get_user_option_value(option))
+    before_native = str(actor.get_editor_property(native))
+
+    with unreal.ScopedEditorTransaction("MCP set_device_option: %s" % option):
+        actor.set_editor_property(native, value)
+
+    after_option = str(actor.get_user_option_value(option))
+    after_native = str(actor.get_editor_property(native))
+
+    saved = None
+    if save:
+        saved = _level_editor().save_current_level()
+
+    return {
+        "actor": _serialize_actor(actor),
+        "option": option,
+        "native_property": native,
+        "before": {"option": before_option, "native": before_native},
+        "after": {"option": after_option, "native": after_native},
+        "option_followed": after_option != before_option,
+        "saved": saved,
+        "note": (
+            "durable only once saved - pass save=true, or call save_current_level. "
+            "In-memory read-back is not proof of persistence; grep the .uasset if it matters."
+        ),
     }
 
 
