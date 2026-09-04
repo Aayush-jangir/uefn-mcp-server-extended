@@ -761,3 +761,80 @@ errors**. It refuses function-style options with a message explaining why.
 **Not yet proven, and deliberately not claimed:** that a write survives a *Verse rebuild*, or that
 UEFN's publish pipeline accepts an island authored this way (§3 P15). Validation is a pre-flight,
 never a publish guarantee.
+
+## 14. HONEST RE-TEST + P14 — 2026-09-04
+
+### 14a. The committed file, not the hot-patch — **PASSES**
+
+Everything in §13h was tested against a **hot-patched** listener, i.e. code living only in that
+session. That is not a shipped tool. Re-tested properly:
+
+- The listener was reloaded from disk. Confirmed fresh, not by trusting the reload but by probing
+  for `_is_device` — a symbol that only ever existed in the hot-patched namespace. **Absent.**
+- `set_device_option` was then driven **through the real MCP tool**, not raw HTTP.
+- `LabelOverride="DISK_PROOF_1"` on the End Game device with `save=true` → **present 4× in the
+  saved `.uasset`.**
+
+**The committed file alone reproduces the result.** The tools are also visible as real MCP tools
+now, so the server process has reloaded too.
+
+### 14b. P14 — Verse rebuild survival. **PASSES**, and the first attempt was worthless
+
+`VerseToolset.BuildAll` via `call_method` on the CDO works with no arguments — **P6 settled**.
+The log confirms a genuine build: `Verse compile starting (instigator=User)` →
+`Compilation complete` → `Linking complete` → `SUCCESS -- Build complete`.
+
+**But the first run proved nothing and was nearly reported as a pass.** The sandbox had **no
+`.verse` files at all**, so the compile was a no-op:
+`Global Verse compile finished: No packages found requiring compilation.` Markers "surviving" a
+build that never rebuilt anything is not evidence.
+
+Fixed by giving the sandbox real Verse code (`Content/p14_probe.verse`, a trivial
+`creative_device` with one `@editable`) and rebuilding. That produced a genuine incremental
+compile: **`Global Verse compile (incremental, 1 packages compiled in 917.9 ms) finished: SUCCESS`.**
+
+After that real compile, **every marker survived on disk**: `DISK_PROOF_1`, `MCP_P4_F`,
+`SHIPPED_TOOL_TEST`, and the numeric writes `7.770000`, `9.990000`, `3.330000` — and the live
+editor still reads `LabelOverride = DISK_PROOF_1`.
+
+**Conclusion: a Verse rebuild does not regenerate device external-actor assets and does not
+clobber native property writes.**
+
+**Residual limit, stated rather than hidden:** the package that recompiled was the probe file, and
+none of the written devices are Verse devices bound to that code. A Verse device whose own
+`@editable`s are rewritten by a rebuild is not covered by this test.
+
+### 14c. P15 — publish. **NOT SETTLED. Not scriptable from here.**
+
+There is **no publish path through this bridge**, and this was checked rather than assumed:
+
+- The 470 KB / 168-tool schema corpus contains **no publish tool**. Searching every tool name and
+  description for publish/upload/version returned 4 hits, all false positives matching
+  "conversion" and "ListConversionFunctions".
+- Named subsystem candidates `FortCreativePublishSubsystem`, `FortPublishSubsystem`,
+  `ValkyriePublishSubsystem`, `FortUGCPublishSubsystem`, `FortProjectSubsystem` — **all absent**.
+
+Publishing is a GUI wizard, and it is outward-facing and account-affecting, so it is a human
+action by design. **P15 stays UNPROVEN until a private version is published by hand.**
+
+**Nothing may be written to The Scar until it is** — a write path that passes validation but
+breaks at publish would be the worst thing to discover on a live island.
+
+### 14d. Prepared for The Scar (NOT applied)
+
+The two settings and their resolved native properties, confirmed on the sandbox actor:
+
+| Option | Native property | TheScar now | Target |
+|---|---|---|---|
+| `Matchmaking_MinPlayers` | `matchmaking_minplayers` | 2 | **1** |
+| `Matchmaking_OvertimePlayerTarget` | `matchmaking_overtimeplayertarget` | 2 | **1** |
+
+Supporting evidence that the target state is safe: **Blank_Test_Project already runs at
+`minPlayers=1`, `overtimePlayerTarget=1`** and validates **71/71 VALID, 0 errors**.
+
+Rationale: at ~63 clicks/day split across regions, a two-stranger queue bar is rarely met — 244 of
+252 clicks never became a session. Setting both to 1 lets a lone player start a match.
+
+**Sequence when P15 clears: Lore check-in FIRST, then write both via `set_device_option`, save,
+verify on disk, change NOTHING else, and stop at "ready to publish."** Any second change in the
+same release makes the clicks-to-plays before/after uninterpretable.
