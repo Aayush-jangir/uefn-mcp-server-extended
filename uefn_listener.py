@@ -11,6 +11,7 @@ Or auto-start via init_unreal.py.
 
 import io
 import json
+import os
 import queue
 import socket
 import sys
@@ -707,6 +708,466 @@ def _cmd_set_viewport_camera(
     rot = unreal.Rotator(*rotation) if rotation else cur_rot
     unreal.EditorLevelLibrary.set_level_viewport_camera_info(loc, rot)
     return {"location": _serialize(loc), "rotation": _serialize(rot)}
+
+
+
+
+# ===========================================================================
+# EXTENDED EDITOR CONTROL  (added by the uefn-mcp-server-extended fork)
+#
+# Every API below was signature-verified against a live UEFN editor before
+# being wrapped. See MCP_UPGRADE.md section 2a.
+#
+# RULE (MCP_UPGRADE.md section 8): never enumerate arbitrary reflected members
+# here. Probe named candidates with hasattr/getattr only - blind dir() sweeps
+# over UObject reflection crashed the editor once already.
+# ===========================================================================
+
+
+def _level_editor():
+    """The LevelEditorSubsystem, or raise a clear error."""
+    sub = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+    if sub is None:
+        raise RuntimeError("LevelEditorSubsystem unavailable")
+    return sub
+
+
+def _find_actor(actor_path: str):
+    """Resolve an actor by full path name, falling back to label then name."""
+    actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    actors = actor_sub.get_all_level_actors()
+    for a in actors:
+        if a.get_path_name() == actor_path:
+            return a
+    for a in actors:
+        if a.get_actor_label() == actor_path or a.get_name() == actor_path:
+            return a
+    raise ValueError("Actor not found: " + str(actor_path))
+
+
+def _world(prefer_game: bool = False):
+    """Return a world usable as a world context object.
+
+    During play-in-editor the PIE world is what console commands should
+    target; outside play mode only the editor world exists.
+    """
+    ues = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
+    if prefer_game:
+        try:
+            gw = ues.get_game_world()
+            if gw is not None:
+                return gw
+        except Exception:
+            pass
+    return ues.get_editor_world()
+
+
+# -- Play mode ---------------------------------------------------------------
+
+
+@_register("play_mode")
+def _cmd_play_mode(action: str = "status") -> dict:
+    """Control play-in-editor.
+
+    action: "start" | "stop" | "simulate" | "status"
+
+    NOTE: start/stop are *requests* - Unreal services them at the end of the
+    frame, so is_in_play_in_editor() still reports the OLD value within this
+    same call. Poll play_mode(action="status") afterwards to confirm.
+    """
+    les = _level_editor()
+    action = (action or "status").lower()
+
+    if action == "start":
+        if les.is_in_play_in_editor():
+            return {"action": action, "requested": False,
+                    "in_play_mode": True, "note": "already in play mode"}
+        les.editor_request_begin_play()
+    elif action == "stop":
+        if not les.is_in_play_in_editor():
+            return {"action": action, "requested": False,
+                    "in_play_mode": False, "note": "not in play mode"}
+        les.editor_request_end_play()
+    elif action == "simulate":
+        les.editor_play_simulate()
+    elif action == "status":
+        pass
+    else:
+        raise ValueError(
+            "Unknown action '" + str(action) + "'. Use: start, stop, simulate, status"
+        )
+
+    deferred = action in ("start", "stop", "simulate")
+    return {
+        "action": action,
+        "requested": deferred,
+        "in_play_mode": les.is_in_play_in_editor(),
+        "note": ("deferred to end of frame - poll status to confirm" if deferred else ""),
+    }
+
+
+# -- Pilot -------------------------------------------------------------------
+
+
+@_register("pilot_actor")
+def _cmd_pilot_actor(action: str = "status", actor_path: str = "") -> dict:
+    """Pilot (possess) a level actor with the viewport camera.
+
+    action: "pilot" | "eject" | "status"
+    """
+    les = _level_editor()
+    action = (action or "status").lower()
+
+    if action == "pilot":
+        if not actor_path:
+            raise ValueError("actor_path is required for action='pilot'")
+        les.pilot_level_actor(_find_actor(actor_path))
+    elif action == "eject":
+        les.eject_pilot_level_actor()
+    elif action == "status":
+        pass
+    else:
+        raise ValueError("Unknown action '" + str(action) + "'. Use: pilot, eject, status")
+
+    current = les.get_pilot_level_actor()
+    return {
+        "action": action,
+        "piloting": _serialize_actor(current) if current else None,
+    }
+
+
+# -- Screenshot --------------------------------------------------------------
+
+
+def _screenshot_tasks() -> dict:
+    """Live AutomationEditorTask objects, keyed by filename.
+
+    CRITICAL: the task returned by take_high_res_screenshot MUST be kept
+    referenced. Dropping it lets Python garbage-collect the task, which
+    cancels the capture - the call succeeds, no error is raised, and no file
+    is ever written. That exact bug cost a debugging round here; do not
+    "simplify" this registry away.
+    """
+    if not hasattr(unreal, "_mcp_screenshot_tasks"):
+        unreal._mcp_screenshot_tasks = {}
+    return unreal._mcp_screenshot_tasks
+
+
+@_register("take_screenshot")
+def _cmd_take_screenshot(
+    filename: str = "",
+    res_x: int = 1920,
+    res_y: int = 1080,
+    force_game_view: bool = False,
+    delay: float = 0.0,
+) -> dict:
+    """Start a high-resolution viewport capture.
+
+    Asynchronous: Unreal needs several editor ticks to render and write the
+    file, so this returns immediately with pending=True. Poll
+    screenshot_status(filename) until done. (The MCP wrapper does that for
+    you and only returns once the file has landed.)
+
+    Output goes to the editor's Screenshots folder under AppData - NOT under
+    the island's Content/ folder, so nothing here is bundled at publish.
+    """
+    if not filename:
+        filename = "mcp_" + str(int(time.time())) + ".png"
+    if not filename.lower().endswith(".png"):
+        filename = filename + ".png"
+
+    shot_dir = unreal.Paths.screen_shot_dir()
+    full_path = os.path.normpath(os.path.join(shot_dir, filename))
+
+    # Remove a stale file of the same name so "exists" means "this capture".
+    if os.path.isfile(full_path):
+        try:
+            os.remove(full_path)
+        except Exception:
+            pass
+
+    task = unreal.AutomationLibrary.take_high_res_screenshot(
+        int(res_x), int(res_y), filename,
+        force_game_view=bool(force_game_view),
+        delay=float(delay),
+    )
+    _screenshot_tasks()[filename] = task  # keep alive - see _screenshot_tasks
+
+    # Nudge the viewport so an idle editor actually renders a frame.
+    try:
+        _level_editor().editor_invalidate_viewports()
+    except Exception:
+        pass
+
+    return {
+        "path": full_path,
+        "directory": shot_dir,
+        "filename": filename,
+        "resolution": [int(res_x), int(res_y)],
+        "pending": True,
+        "task_valid": bool(task is not None and task.is_valid_task()),
+        "note": "async - poll screenshot_status(filename) until done",
+    }
+
+
+@_register("screenshot_status")
+def _cmd_screenshot_status(filename: str) -> dict:
+    """Report whether a capture started by take_screenshot has landed."""
+    if not filename.lower().endswith(".png"):
+        filename = filename + ".png"
+
+    shot_dir = unreal.Paths.screen_shot_dir()
+    full_path = os.path.normpath(os.path.join(shot_dir, filename))
+    tasks = _screenshot_tasks()
+    task = tasks.get(filename)
+
+    done = None
+    if task is not None:
+        try:
+            done = bool(task.is_task_done())
+        except Exception:
+            done = None
+
+    exists = os.path.isfile(full_path)
+    size = os.path.getsize(full_path) if exists else 0
+
+    # Keep nudging an idle editor until the capture completes.
+    if not exists:
+        try:
+            _level_editor().editor_invalidate_viewports()
+        except Exception:
+            pass
+    elif filename in tasks:
+        del tasks[filename]  # landed - release the task
+
+    return {
+        "filename": filename,
+        "path": full_path,
+        "task_done": done,
+        "exists": exists,
+        "size_bytes": size,
+    }
+
+
+# -- Console commands --------------------------------------------------------
+
+
+@_register("console_command")
+def _cmd_console_command(command: str, use_game_world: bool = True) -> dict:
+    """Run an Unreal console command, e.g. 'stat fps' or 'r.ScreenPercentage 50'.
+
+    Console commands return nothing; read get_editor_log for their output.
+    """
+    if not command:
+        raise ValueError("command is required")
+    world = _world(prefer_game=use_game_world)
+    if world is None:
+        raise RuntimeError("No world available to run the console command against")
+    unreal.SystemLibrary.execute_console_command(world, command)
+    return {
+        "command": command,
+        "world": world.get_name(),
+        "note": "fire-and-forget - read get_editor_log for output",
+    }
+
+
+# -- Validation --------------------------------------------------------------
+
+
+@_register("validate_assets")
+def _cmd_validate_assets(
+    asset_paths: Optional[List[str]] = None,
+    directory: str = "",
+    recursive: bool = True,
+    usecase: str = "MANUAL",
+) -> dict:
+    """Run Fortnite's asset validators - the scripted pre-publish check.
+
+    Give either asset_paths (explicit) or directory (scan). Returns per-asset
+    validity plus every validator error and warning.
+    """
+    validator = unreal.get_editor_subsystem(unreal.FortEditorValidatorSubsystem)
+    if validator is None:
+        raise RuntimeError("FortEditorValidatorSubsystem unavailable")
+
+    usecase_name = (usecase or "MANUAL").upper()
+    usecase_enum = getattr(unreal.DataValidationUsecase, usecase_name, None)
+    if usecase_enum is None:
+        raise ValueError(
+            "usecase must be one of: COMMANDLET, MANUAL, NONE, PRE_SUBMIT, SAVE, SCRIPT"
+        )
+
+    registry = unreal.AssetRegistryHelpers.get_asset_registry()
+
+    targets = []
+    if asset_paths:
+        for p in asset_paths:
+            data = registry.get_asset_by_object_path(p)
+            if data is not None and data.is_valid():
+                targets.append(data)
+            else:
+                targets.append(p)  # unresolved - reported below
+    elif directory:
+        targets = list(registry.get_assets_by_path(directory, recursive=recursive))
+    else:
+        raise ValueError("Give either asset_paths or directory")
+
+    results = []
+    n_invalid = 0
+    n_errors = 0
+    n_warnings = 0
+
+    for t in targets:
+        if isinstance(t, str):
+            results.append({"asset": t, "result": "UNRESOLVED",
+                            "errors": ["asset not found in the asset registry"],
+                            "warnings": []})
+            n_invalid += 1
+            n_errors += 1
+            continue
+
+        name = str(t.package_name)
+        try:
+            outcome, errors, warnings = validator.is_asset_valid(t, usecase_enum)
+        except Exception as e:
+            results.append({"asset": name, "result": "VALIDATOR_FAILED",
+                            "errors": [str(e)], "warnings": []})
+            n_invalid += 1
+            n_errors += 1
+            continue
+
+        errs = [str(x) for x in errors]
+        warns = [str(x) for x in warnings]
+        state = str(outcome).rsplit(".", 1)[-1]
+        if state == "INVALID":
+            n_invalid += 1
+        n_errors += len(errs)
+        n_warnings += len(warns)
+        results.append({"asset": name, "result": state,
+                        "errors": errs, "warnings": warns})
+
+    return {
+        "usecase": usecase_name,
+        "checked": len(results),
+        "invalid": n_invalid,
+        "error_count": n_errors,
+        "warning_count": n_warnings,
+        "results": results,
+    }
+
+
+# -- Creative device options -------------------------------------------------
+#
+# Reading device options works and is the richest UEFN-specific data available
+# (MCP_UPGRADE.md section 2b - a Barrier returns all 23 options with values).
+# WRITING is genuinely blocked: set_user_option_value() takes a PlayerController
+# as arg 1 and returns False for None. Do not add a write tool until section 4
+# item 4 finds a real path - a silently no-op tool is worse than no tool.
+
+
+def _read_options(actor):
+    """Return an actor's user options, or None if it is a plain prop.
+
+    EVERY placed actor in UEFN answers get_user_option_values(), so the mere
+    presence of that method does not make something a device. Measured across
+    all 1089 option-bearing actors in The Scar: 1038 returned exactly one
+    option ("LabelOverride" - the base label every placed actor carries) and
+    the other 51 were the real Creative devices plus the player spawners.
+    So "more than one option" is the separator, and unlike a Device_* name
+    prefix it also catches BP_Creative_Player_Spawner_Prop_C.
+    """
+    if not hasattr(actor, "get_user_option_values"):
+        return None
+    try:
+        values = actor.get_user_option_values()
+    except Exception:
+        return None
+    options = {}
+    for k, v in values.items():
+        options[str(k)] = str(v)
+    if len(options) <= 1:
+        return None
+    return options
+
+
+def _device_kind(actor) -> str:
+    """"device" for a first-class Creative/Verse device, else "configurable"."""
+    cls = actor.get_class().get_name()
+    if cls.startswith("Device_") or cls == "VerseDevice_C":
+        return "device"
+    return "configurable"
+
+
+@_register("list_devices")
+def _cmd_list_devices(class_filter: str = "", kind: str = "") -> dict:
+    """List every configurable Creative actor in the level.
+
+    Excludes the ~1000 static props, which expose only a label.
+    """
+    actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    devices = []
+    for a in actor_sub.get_all_level_actors():
+        options = _read_options(a)
+        if options is None:
+            continue
+        cls = a.get_class().get_name()
+        if class_filter and class_filter.lower() not in cls.lower():
+            continue
+        k = _device_kind(a)
+        if kind and kind.lower() != k:
+            continue
+        entry = _serialize_actor(a)
+        entry["kind"] = k
+        entry["option_count"] = len(options)
+        devices.append(entry)
+
+    by_class = {}
+    for d in devices:
+        by_class[d["class"]] = by_class.get(d["class"], 0) + 1
+
+    return {"devices": devices, "count": len(devices), "by_class": by_class}
+
+
+@_register("get_device_options")
+def _cmd_get_device_options(actor_path: str) -> dict:
+    """Read every user-facing option on a Creative device, with its value.
+
+    Verse @editable values are NOT returned by THIS API - a VerseDevice gives
+    only its three base Creative options here. That is a limit of
+    get_user_option_values(), NOT of the editor: DeviceToolset.GetDeviceProperties
+    reads the real unmangled @editable names and live values (verified
+    2026-09-04 on "leaderboard manager": rowsToShow=5, boardTopMargin=270).
+    See MCP_UPGRADE.md section 9b. The old section 2c claim that they are
+    invisible is WRONG - do not reintroduce it.
+    """
+    actor = _find_actor(actor_path)
+    options = _read_options(actor)
+    if options is None:
+        if not hasattr(actor, "get_user_option_values"):
+            raise ValueError(
+                str(actor.get_actor_label()) + " ("
+                + str(actor.get_class().get_name())
+                + ") exposes no user options at all"
+            )
+        raise ValueError(
+            str(actor.get_actor_label()) + " ("
+            + str(actor.get_class().get_name())
+            + ") is a plain prop - its only option is LabelOverride. "
+            "Use list_devices to find the configurable actors."
+        )
+    return {
+        "actor": _serialize_actor(actor),
+        "kind": _device_kind(actor),
+        "options": options,
+        "count": len(options),
+        "writable": False,
+        "note": ("no PROVEN write path yet. set_user_option_value needs a "
+                 "PlayerController and no-ops with None. ToolsetLibrary."
+                 "set_object_properties returns True and reads back changed, "
+                 "but get_user_option_value still returns the OLD value - the "
+                 "two representations diverge, so that is not a working write. "
+                 "See MCP_UPGRADE.md 9c / probe P3."),
+    }
 
 
 # ---------------------------------------------------------------------------

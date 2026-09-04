@@ -593,6 +593,209 @@ def set_viewport_camera(
 
 
 # ---------------------------------------------------------------------------
+# Extended editor control (uefn-mcp-server-extended fork)
+#
+# These close the biggest gaps against the Unity MCP server. Every underlying
+# API was signature-verified in a live UEFN editor - see MCP_UPGRADE.md.
+# ---------------------------------------------------------------------------
+
+
+# play_mode / PIE is deliberately NOT exposed as a tool.
+#
+# IMPLEMENTATION_PLAN.md section 2, ruling 9: UEFN's play model is
+# Play-in-Client via SessionToolset, and PIE entry triggers the world change
+# that kills the in-process listener - the bridge dies mid-call. The API is
+# available (LevelEditorSubsystem.editor_request_begin_play), which is exactly
+# why it is tempting; availability is not a reason to ship it.
+#
+# The listener still carries a play_mode handler for deliberate manual use via
+# execute_python, but no agent gets a one-call path to killing the bridge.
+
+
+@mcp.tool()
+def pilot_actor(action: str = "status", actor_path: str = "") -> str:
+    """Attach the viewport camera to an actor, or detach it.
+
+    Args:
+        action: "pilot", "eject", or "status".
+        actor_path: Full path, label, or name of the actor to pilot.
+                    Required when action is "pilot".
+    """
+    params: dict[str, Any] = {"action": action}
+    if actor_path:
+        params["actor_path"] = actor_path
+    result = _send_command("pilot_actor", params)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def take_screenshot(
+    filename: str = "",
+    res_x: int = 1920,
+    res_y: int = 1080,
+    force_game_view: bool = False,
+    delay: float = 0.0,
+    wait_seconds: float = 20.0,
+) -> str:
+    """Capture a high-resolution screenshot of the UEFN viewport.
+
+    Use this to SEE the editor rather than infer its state from properties.
+    The PNG lands in the editor's Screenshots folder (under AppData, not in
+    the island's Content/ folder, so it is never bundled at publish). The
+    returned "path" can be opened with the Read tool.
+
+    The capture takes several editor frames; this tool waits for the file to
+    land before returning, so "exists": true means it is really on disk.
+
+    Args:
+        filename: Output name. Defaults to a timestamped mcp_*.png.
+        res_x: Width in pixels.
+        res_y: Height in pixels.
+        force_game_view: Hide editor-only gizmos and icons in the capture.
+        delay: Seconds to wait before capturing.
+        wait_seconds: How long to wait for the file to appear.
+    """
+    result = _send_command(
+        "take_screenshot",
+        {
+            "filename": filename,
+            "res_x": res_x,
+            "res_y": res_y,
+            "force_game_view": force_game_view,
+            "delay": delay,
+        },
+    )
+
+    # The capture needs several editor ticks. Poll here rather than blocking
+    # the editor's main thread, so the tool returns a file that actually exists.
+    name = result.get("filename", filename)
+    deadline = time.time() + max(5.0, wait_seconds)
+    status = {}
+    while time.time() < deadline:
+        time.sleep(0.4)
+        try:
+            status = _send_command("screenshot_status", {"filename": name})
+        except Exception:
+            continue
+        if status.get("exists"):
+            break
+
+    result.update(
+        {
+            "pending": not status.get("exists", False),
+            "exists": status.get("exists", False),
+            "size_bytes": status.get("size_bytes", 0),
+        }
+    )
+    if not status.get("exists", False):
+        result["note"] = (
+            "capture did not land within %.0fs. The UEFN window may be idle - "
+            "click it to give the editor focus, then retry." % wait_seconds
+        )
+    else:
+        result["note"] = "saved - open it with the Read tool"
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def console_command(command: str, use_game_world: bool = True) -> str:
+    """Run an Unreal console command inside UEFN.
+
+    Examples: "stat fps", "stat unit", "r.ScreenPercentage 50", "showflag.Collision 1".
+
+    Console commands produce no return value - read their output with
+    get_editor_log afterwards.
+
+    Args:
+        command: The console command line.
+        use_game_world: Target the play-in-editor world when one exists.
+                        Set false to always target the editor world.
+    """
+    result = _send_command(
+        "console_command", {"command": command, "use_game_world": use_game_world}
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def validate_assets(
+    asset_paths: Optional[list[str]] = None,
+    directory: str = "",
+    recursive: bool = True,
+    usecase: str = "MANUAL",
+) -> str:
+    """Run Fortnite's own asset validators - the scripted pre-publish check.
+
+    This is the tool that answers "is this island safe to publish?" without
+    clicking through the editor. It reports, per asset, whether Epic's
+    validators consider it VALID, INVALID, or NOT_VALIDATED, plus every
+    validator error and warning.
+
+    Give either asset_paths or directory, not both.
+
+    Args:
+        asset_paths: Explicit list of asset object paths to validate.
+        directory: Content path to scan instead, e.g. "/Game/".
+        recursive: Recurse into subfolders when scanning a directory.
+        usecase: One of COMMANDLET, MANUAL, NONE, PRE_SUBMIT, SAVE, SCRIPT.
+                 PRE_SUBMIT is the strictest and the closest to publishing.
+    """
+    params: dict[str, Any] = {"recursive": recursive, "usecase": usecase}
+    if asset_paths:
+        params["asset_paths"] = asset_paths
+    if directory:
+        params["directory"] = directory
+    result = _send_command("validate_assets", params, timeout=120.0)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def list_devices(class_filter: str = "", kind: str = "") -> str:
+    """List every configurable Creative actor placed in the level.
+
+    Devices are the gameplay logic of an island - barriers, item granters,
+    timers, score managers, player spawners. This finds them all and reports
+    how many options each exposes, plus a by_class summary.
+
+    Static props are excluded: every placed actor in UEFN answers the options
+    API, but a prop's only option is its label, so anything with a single
+    option is filtered out.
+
+    Args:
+        class_filter: Case-insensitive substring of the class,
+                      e.g. "Barrier" or "ItemGranter".
+        kind: "device" for first-class Device_*/VerseDevice actors,
+              "configurable" for other option-bearing actors such as player
+              spawners. Empty returns both.
+    """
+    result = _send_command(
+        "list_devices", {"class_filter": class_filter, "kind": kind}
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def get_device_options(actor_path: str) -> str:
+    """Read every configurable option on a Creative device, with its value.
+
+    This exposes the device's Details-panel settings - the things a creator
+    would normally click through in the UEFN UI.
+
+    Two limits, both measured rather than assumed:
+      - Options are READ-ONLY here. No proven write path exists yet, so no
+        write tool is offered rather than one that silently does nothing.
+      - This API does not surface Verse @editable values; a VerseDevice
+        returns only its three base Creative options. They ARE readable by a
+        different route (DeviceToolset.GetDeviceProperties), just not here.
+
+    Args:
+        actor_path: Full path, label, or name of the device actor.
+    """
+    result = _send_command("get_device_options", {"actor_path": actor_path})
+    return json.dumps(result, indent=2)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

@@ -65,7 +65,7 @@ passing `None` returns `False` — no exception, no write. The `ToyOptionsCompon
 **zero** data properties to Python, and the option values are **not** mirrored in any native
 UPROPERTY on the actor. Finding a write path is the hardest open problem in this project.
 
-### 2c. CONFIRMED BLOCKED
+### 2c. ~~CONFIRMED BLOCKED~~ — SUPERSEDED BY §11 (P2). The Verse claim below is WRONG.
 
 - **Verse `@editable` values are invisible.** A `VerseDevice_C` returns only the three base
   Creative options — `Enabled at Game Start`, `LabelOverride`, `VisibleInGame`. The Verse
@@ -306,3 +306,138 @@ session.** That is a direct violation of the standing rule in `G:\Claude Local\C
 Subagents inherit the session's MCP tools. **A research workflow must be told, in its prompt, not
 to touch the `uefn` tools** — or it will, because the tools are right there and the task invites it.
 Web research and file reading only. The live editor belongs to the main session alone.
+
+## 11. §9d PROBE RESULTS — 2026-09-04, run in the live editor
+
+All four §9d probes were run in this session against `uefn-extended` on port 8775,
+Beta Access flag OFF. §9 was labelled HIGH-CONFIDENCE-UNVERIFIED. **Three of its four
+claims are now VERIFIED; the fourth is REFUTED as stated.**
+
+### P1 — ToolsetRegistry — **VERIFIED, exact match**
+
+`unreal.ToolsetRegistry.is_available()` → `True`.
+`get_all_toolset_json_schemas()` → **470,110 bytes**, a JSON *list* of 12 toolsets,
+**168 tools** total. Byte-for-byte agreement with V12.
+
+`NiagaraToolset_System` 46, `EditorAppToolset` 37, `UMGToolSet` 21, `PhysicsAssetToolset` 17,
+`MVVMToolset` 15, `WidgetAnimationToolset` 10, `VerseFieldsToolset` 6, `LogsToolset` 4,
+`GameplayTagsToolset` 4, `NiagaraToolset_Component` 4, `NiagaraToolset_Assets` 3,
+`NiagaraToolset_Info` 1.
+
+`is_toolset_registered("DeviceToolset")` → `False`, confirming **V13**: the Valkyrie toolsets
+are callable while unregistered. Registration is what the beta flag buys; capability is not.
+
+### P2 — Verse `@editable`s — **VERIFIED. §2c is WRONG and is now superseded.**
+
+`DeviceToolset.GetDeviceProperties` needs **two** args — the error
+`required argument 'property_names' (pos 2) not found` reveals the signature. Call
+`ListDeviceProperties(device)` first for the schema, then `GetDeviceProperties(device, names)`.
+
+On `leaderboard manager` (`VerseDevice_C`), unmangled names **and** live values came back:
+
+```
+rowsToShow: 5            boardTopMargin: 270      boardLeftMargin: 60
+debugSeedBoard: false    debugLogEliminations: false
+objectiveLine: "TOP THE BOARD - EVERY DEATH SCARS THE GROUND"
+eliminationManager: {"refPath": "...leaderboard_manager_0.__verse_0x2DD0D81D_EliminationManager"}
+```
+
+**§2c's conclusion was right about `get_user_option_values()` and wrong about the editor.**
+The nine Verse devices in The Scar are: leaderboard, scar, revenge, hud, juggernaut, loadout,
+trophy, onboarding, progression manager.
+
+### P3 — `ToolsetLibrary` read — **VERIFIED, exact match with V15**
+
+Signatures read from `__doc__`, not by calling:
+```
+get_object_properties(object, property_names) -> str
+set_object_properties(object, properties_json, bypass_container_check=BypassContainerCheck.NO) -> bool
+```
+`barrier.get_user_option_definitions()` → `ToyOptionsComponent_C`. Reading `PlayerOptionData`
+off it returned **18 `propertyOverrides`** as clean JSON (`BlockWeaponFire: "True"`,
+`BaseVisibleDuringGame: "False"`, …) — the writable-shaped form V15 described.
+18 overrides, not 23: the five function-style options carry no override entry.
+
+### P4 — the write — **REFUTED AS STATED. `set_object_properties` is NOT a working write path.**
+
+On `TrophyBarrier_W`, writing the full 18-entry array back with only `LabelOverride`
+changed to `MCP_PROBE_1`, inside a `ScopedEditorTransaction`:
+
+| Check | Result |
+|---|---|
+| `set_object_properties` return | **`True`** |
+| read back via `ToolsetLibrary.get_object_properties` | **`MCP_PROBE_1`** — changed |
+| read back via `device.get_user_option_value("LabelOverride")` | **`TrophyBarrier_W`** — UNCHANGED |
+| `actor.get_actor_label()` | **`TrophyBarrier_W`** — UNCHANGED |
+
+**The two representations diverge.** `set_object_properties` writes a parallel property bag that
+the device's actual option state never reads. A caller who verified with the same API it wrote
+through would have declared success — this is precisely the false pass
+`CLAUDE.md` warns about, and it is why §9c's "candidate write path" must not be promoted to fact.
+
+**Not disproven:** that some additional step (a `PostEditChangeProperty` broadcast, `modify()`,
+`bypass_container_check`, or a save+reload) makes it take. **Disproven:** that the call alone
+writes a device option. P3/P4 in §3 stay UNPROVEN; §9c must not be read as "solved".
+
+**Disk evidence:** the level save was refused by the permission layer, so **nothing reached disk**.
+The in-memory change was then restored from a verbatim copy of the original JSON and confirmed
+byte-identical, with both APIs agreeing on `TrophyBarrier_W`. `grep -rl MCP_PROBE_1` over
+`TheScar\Content\__ExternalActors__\` returns nothing; `TrophyBarrier_W` still appears 4× in
+`__ExternalActors__\TheScar\1\8W\FLT01UIF23Q9PCGJOY1B56.uasset`. **The Scar is unmodified.**
+Completing P4 needs a level save, which requires the user's approval.
+
+### Corrections applied to §2 as a result
+
+- **§2c is superseded by P2.** Verse `@editable`s are readable. The claim that they are
+  invisible was carried into `uefn_listener.py` and `mcp_server.py` docstrings this session
+  and has been corrected in both.
+- **§2b's "writing is genuinely blocked"** stands as *no proven write path*, now with a second
+  refuted candidate (`set_object_properties`) rather than one.
+- Engine is **`++Fortnite+Release-42.10`, CL 57566230** (§9a). "41.30" is `compatibilityVersion`.
+
+---
+
+## 12. WHAT SHIPPED THIS SESSION
+
+Six new first-class tools, flat one-per-operation per `IMPLEMENTATION_PLAN.md` §4.
+34 MCP tools total (was 28); 37 listener handlers.
+
+| Tool | Status | Evidence |
+|---|---|---|
+| `list_devices` | **WORKING** | 51 configurable actors found; the 35 `Device_*`/`VerseDevice_C` match §2e's independent inventory exactly, plus 16 player spawners. 1038 static props correctly excluded. |
+| `get_device_options` | **WORKING** | `TrophyBarrier_W` → 23 options; `BlockWeaponFire=True`, `BaseVisibleDuringGame=False`, `EnabledOnPhase="Gameplay Only"`, `ZoneShape=Box`, `LabelOverride=TrophyBarrier_W` — all five match §2b. Props rejected with a useful message. |
+| `console_command` | **WORKING** | `HighResShot 1280x720` produced `HighresScreenshot00028.png` on disk. Settles **P10** for the file-producing case. |
+| `validate_assets` | **BUILT, UNTESTED** | signatures verified; no validation run yet. |
+| `pilot_actor` | **BUILT, UNTESTED** | signatures verified. |
+| `take_screenshot` | **PARTIAL — see below** | |
+| `play_mode` | **DELIBERATELY NOT EXPOSED** | `IMPLEMENTATION_PLAN.md` §2 ruling 9. Built, then withdrawn from the client surface before ever being invoked. Handler remains for manual `execute_python` use. |
+
+### The screenshot bug worth remembering (P9)
+
+`AutomationLibrary.take_high_res_screenshot` returns an `AutomationEditorTask`. **If you discard
+that object, Python garbage-collects it and the capture is silently cancelled** — the call
+succeeds, no error is raised, no file is ever written. The first implementation dropped the task
+and produced nothing. The listener now holds tasks in `unreal._mcp_screenshot_tasks`; do not
+"simplify" that registry away.
+
+**Still unresolved:** after that fix, captures stopped completing altogether — `is_task_done()`
+stayed `False` past 60 s, and a subsequent bare call that had worked minutes earlier also stopped
+completing. The editor was rendering throughout (frame count advanced 18793→18836 over ~8 s,
+~5 fps), so this is not a frozen-editor stall. Leading hypothesis: the one failed capture
+(the only one passing `force_game_view=False`) wedged the engine's high-res screenshot request,
+and every later request queues behind it. Untested; needs an editor restart to confirm.
+`console_command("HighResShot WxH")` is the working fallback and auto-names its output.
+
+### Known pre-existing defect, not introduced here
+
+`get_editor_log` returns **stale** content — during this session it served lines ending
+37 minutes in the past, and its `filter_str` argument did not filter. Anything reasoning from
+that tool's output is reasoning from a stale snapshot. `IMPLEMENTATION_PLAN.md` §4 already plans
+to replace it with a disk reader in `mcp_server.py`; that is the fix.
+
+### Hot-patching the running listener
+
+The listener's globals are reachable without a restart:
+`unreal._mcp_server.RequestHandlerClass._send_json.__globals__`. `exec`ing new handler source
+into that dict registers handlers into the live `_HANDLERS` with no server restart and no tick
+re-registration. This is how all six tools were loaded into a live editor this session.
