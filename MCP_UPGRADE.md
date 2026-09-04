@@ -107,6 +107,54 @@ construction**, naming the right one - this class of mistake is designed out, no
 
 Full evidence in section 15.
 
+### CLOSED DEAD END - `raycast` hit detail is not retrievable. Stop looking.
+
+`raycast` reports hit / no-hit and nothing more. Everything below was tried; **do not repeat
+this search.**
+
+- The returned object is **`unreal.HitResult`** (confirmed: `type(hit).__name__` ->
+  `"HitResult"`, module `unreal`).
+- `get_editor_property` on `location`, `impact_point`, `impact_normal`, `normal`, `distance`,
+  `time`, `blocking_hit`, `hit_actor`, `actor`, `component`, `hit_component`, `trace_start`
+  -> **all ABSENT**.
+- Direct attribute access on the same names -> **all ABSENT**.
+- `unreal.GameplayStatics.break_hit_result` -> **ABSENT**.
+- **The Verse digests cannot settle it.** Searched `Fortnite.digest.verse` (591 KB),
+  `UnrealEngine.digest.verse` (102 KB) and `Verse.digest.verse` for `hit_result` / `HitResult`:
+  **zero matches in all three.** That is expected in hindsight — the digests document the
+  **Verse** API surface, while `unreal.HitResult` is a **Python/UE reflection struct** in a
+  different namespace. The digests are the right tool for a Verse question and the wrong tool
+  for this one.
+
+**Conclusion: hit/no-hit is the whole capability.** It still answers the question that matters
+for behavioural verification — *is something solid actually there?* To localise a hit, narrow
+the start/end and binary-search it.
+
+### RULE - do NOT tune TheScar through `set_verse_editable`
+
+**Decided 2026-09-05, and this is a project rule, not a preference.**
+
+Measured fact behind it (§13 of the drift report): **not one scalar `@editable` in TheScar
+is overridden in the Details panel.** All 74 scalars sit at their `.verse` source defaults.
+The only 25 overrides are device bindings.
+
+So writing an `@editable` through this bridge **creates an override where none existed**, and
+that override then **silently shadows the source**. `juggernaut_manager.verse` would read
+`BonusHealth = 300` while the game actually runs 400, and every future reader — human or
+agent — is misled by the file. The source stops being the truth and nothing announces it.
+
+| | |
+|---|---|
+| **Reading** tuning (`get_verse_editables`) | fine, encouraged — it is the only way to see live values |
+| **Writing** tuning on TheScar | **NO.** Edit the `.verse` file and rebuild. |
+| **Writing** in a throwaway sandbox | fine — that is what the sandbox is for |
+
+**The good news, and the reason this is a comfortable rule:** because no scalar override
+exists, **TRAP 5 below can only unbind a device — it cannot silently revert a number.**
+An unbound device is a loud, findable failure; a number that quietly went back to default
+would not be. Keeping tuning in the source is what preserves that property, and using
+`set_verse_editable` on TheScar would destroy it.
+
 ### TRAP 5 - renaming a Verse `@editable` silently reverts it to default
 
 Verse overrides serialise under a **mangled name that hashes the fully-qualified Verse path** -

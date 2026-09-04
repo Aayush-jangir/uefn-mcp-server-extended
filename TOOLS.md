@@ -39,7 +39,7 @@ other's device kind by construction and names the right one.
 | Tool | What it does |
 |---|---|
 | `take_screenshot` | High-res viewport capture. Waits for the file to land, so `exists: true` means it is really on disk. |
-| `raycast` | Traces a line and reports whether solid geometry is there. The behavioural-verification primitive. **Limit:** this build's `HitResult` exposes no fields to Python, so it reports hit/no-hit but not where or what. |
+| `raycast` | Traces a line and reports whether solid geometry is there. The behavioural-verification primitive. **Limit:** the returned `unreal.HitResult` exposes no fields to Python — searched via both access styles and via all three Verse digests, all negative. Hit/no-hit is the whole capability; see MCP_UPGRADE.md §0 "CLOSED DEAD END" before investigating. |
 | `validate_assets` | Runs Fortnite's own validators. `PRE_SUBMIT` is the strictest. A pre-flight, **not** a publish guarantee. |
 | `read_log` | Reads the editor log **off disk**, from the MCP process. Never stale, costs the editor nothing, and works when the editor is hung or the listener is dead. |
 | `read_crashes` | Recent crash reports with call stacks. Works after the editor has died, which is the only time it matters. |
