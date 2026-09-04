@@ -152,3 +152,62 @@ From `CLAUDE.md`: **verify behaviourally, never by reading state back.** For thi
 means: enter play mode and confirm `is_in_play_in_editor()` flips *and* the editor visibly changes;
 take a screenshot and open the file; run validation and read the report. Reading a value back has
 produced confident false passes repeatedly on this project.
+
+---
+
+## 7. THE DEV FORK — set up 2026-09-04
+
+**Repo:** https://github.com/Aayush-jangir/uefn-mcp-server-extended (fork of KirChuvakov/uefn-mcp-server)
+**Local:** `G:\UEFN\uefn-mcp-server-extended`
+**Branch:** `extended-editor-control` (pushed)
+**Remotes:** `origin` = the fork, `upstream` = KirChuvakov's original
+
+### Two servers now run side by side
+
+| | Original (fallback) | Extended (where we work) |
+|---|---|---|
+| Folder | `G:\UEFN\uefn-mcp-server` | `G:\UEFN\uefn-mcp-server-extended` |
+| MCP name | `uefn` | `uefn-extended` |
+| Port range | **8765–8770** | **8775–8780** |
+
+The port split is deliberate: the listener picks the first free port in its range and
+`mcp_server.py` scans that same range, so **without the split the two servers would discover each
+other's listener.** Do not "tidy" them back to the same range.
+
+`.venv` is Python **3.13.14** with **mcp 1.29.1** (2.x drops `mcp.server.fastmcp.FastMCP`).
+Registered with:
+
+```bash
+claude mcp add --scope user uefn-extended -- G:/UEFN/uefn-mcp-server-extended/.venv/Scripts/python.exe G:/UEFN/uefn-mcp-server-extended/mcp_server.py
+```
+
+**`claude mcp list` showing `✔ Connected` only means the stdio process launched.** It does NOT
+mean a listener was found inside UEFN. The real check is calling `ping` on that server.
+
+### Running the extended listener
+
+Inside UEFN: **Tools → Execute Python Script →**
+`G:\UEFN\uefn-mcp-server-extended\uefn_listener.py`
+Needed after **every** UEFN restart — the listener is not persistent.
+Running both listeners at once is fine; they take different ports.
+
+## 8. CRASH — 2026-09-04, read before probing
+
+UEFN crashed during the capability probing. Crash report
+`UECC-Windows-81EA66F740921428E2FA6EB3D32D86D0_0000`:
+
+```
+Unhandled Exception: EXCEPTION_ACCESS_VIOLATION reading address 0x00005f5f7365738b
+CallStack: python311 / ntdll
+```
+
+Top frame is UEFN's **embedded Python interpreter**, 49 minutes into a probing run.
+
+**Cause: blind `dir()` reflection sweeps.** The probes enumerated hundreds of reflected UObject
+members and called `get_editor_property` / `get_editor_subsystem` across them. `TheScar\CLAUDE.md`
+§4 already recorded that this pattern was abandoned once before; it was repeated anyway.
+
+**RULE: never enumerate arbitrary reflected members through the embedded interpreter.**
+Probe named candidates only, with `hasattr` / `getattr`, in small batches, and read the docstring
+rather than calling the function to learn its signature. Enumerating UObject reflection is **not**
+a safe read-only operation — it can and did take the editor down.
