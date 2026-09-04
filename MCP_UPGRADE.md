@@ -211,3 +211,98 @@ members and called `get_editor_property` / `get_editor_subsystem` across them. `
 Probe named candidates only, with `hasattr` / `getattr`, in small batches, and read the docstring
 rather than calling the function to learn its signature. Enumerating UObject reflection is **not**
 a safe read-only operation — it can and did take the editor down.
+
+---
+
+## 9. CORRECTIONS — 2026-09-04, after the research workflow
+
+A 12-agent research workflow ran, and its judge **re-probed the live editor independently**.
+It contradicts §2 in three places. **Its claims are NOT yet verified by this session** — the
+listener died before I could re-check them. Treat everything here as HIGH-CONFIDENCE-UNVERIFIED
+and re-run the probes in §9d before building on them.
+
+Full plan: `IMPLEMENTATION_PLAN.md`. Losing designs: `docs/design-a-pragmatic.md`,
+`docs/design-b-completeness.md`.
+
+### 9a. Engine version was wrong
+
+**The editor is `++Fortnite+Release-42.10`, CL 57566230** — not 41.30. "41.30" is the
+`compatibilityVersion` inside `TheScar.uefnproject`, which is a different thing.
+Source: `C:\Program Files\Epic Games\Fortnite\Engine\Build\Build.version`.
+
+### 9b. §2c is WRONG — Verse `@editable` values ARE readable
+
+§2c says Verse `@editable`s are invisible because `get_user_option_values()` on a `VerseDevice_C`
+returns only three base options. **That conclusion was right about the API I tried and wrong about
+the editor.** There is another path:
+
+```python
+unreal.get_default_object(unreal.DeviceToolset).call_method("ListDeviceProperties", args=(verse_device,))
+unreal.get_default_object(unreal.DeviceToolset).call_method("GetDeviceProperties",  args=(verse_device,))
+```
+
+Reported to return the **real, unmangled `@editable` names and live values** off
+`leaderboard manager` — `rowsToShow: 5`, `boardTopMargin: 270`, `debugSeedBoard: false`,
+`eliminationManager`, `objectiveLine`, `boardLeftMargin`, `debugLogEliminations` — with object
+refs resolved to `{"refPath": "…__verse_0x2DD0D81D_EliminationManager"}`.
+
+**`DeviceToolset` is Verse-device-only.** Passing a Creative device is rejected with
+`Cannot nativize 'FortCreativeDeviceProp' as 'Device'`.
+
+### 9c. §2b's "write path unknown" — there is a candidate
+
+`unreal.ToolsetLibrary` **exists with the Beta Access flag OFF** and exposes
+`get_object_properties`, **`set_object_properties`**, `list_struct_properties`,
+`get_derived_classes`, `undo_transaction`. Reported working:
+
+```python
+unreal.ToolsetLibrary.get_object_properties(toy_options_component, ["PlayerOptionData"])
+# -> {"PlayerOptionData":{"propertyOverrides":[{"propertyName":"BlockWeaponFire","propertyData":"True"}, ...]}}
+```
+
+The symmetric `set_object_properties` is the candidate write path for Creative device options —
+**the hardest open problem in §2b.** Unproven that a write persists, fires
+`PostEditChangeProperty`, or survives publish validation. **Verify on disk, not by read-back.**
+
+### 9d. The bigger finding, and the recommendation
+
+`unreal.ToolsetRegistry` is available and `get_all_toolset_json_schemas()` reportedly returns
+**~470 KB describing 12 toolsets and 168 tools**, each with a full `inputSchema`. Epic's native
+toolset classes (`DeviceToolset`, `EntityToolset`, `SessionToolset`, `VerseToolset`, `LogsToolset`,
+`EditorAppToolset`, …) are callable via `call_method` on the CDO **without enabling the beta flag**.
+
+**Recommendation: do NOT tick Beta Access → UEFN MCP Toolsets, and do NOT register Epic's
+`unreal-mcp` as a second server.** Reasons: it buys transport, not capability; its `ToolsetPolicy`
+*subtracts* (it strips PIE functions that `call_method` reaches anyway); and a second MCP server
+means **two uncoordinated writers on one game thread**.
+
+**The one-line summary:** *"a lot of things are not accessible from the MCP connection" was true of
+the TOOLS, not of the EDITOR.* Everything the Unity benchmark offers that UEFN can meaningfully
+have is already inside the process the listener runs in. This is plumbing and discipline, not
+capability acquisition.
+
+**Probes to re-run first (in this order, targeted, small):**
+1. `unreal.ToolsetRegistry.is_available()` and `len(get_all_toolset_json_schemas())`
+2. `DeviceToolset.GetDeviceProperties` on a `VerseDevice_C`
+3. `ToolsetLibrary.get_object_properties` on a Creative device's `ToyOptionsComponent`
+4. Only then, a `set_object_properties` write — **verified by grepping the saved level on disk**
+
+### 9e. The highest risk, per the plan
+
+Everything above rides on `call_method` against toolsets Epic has **not allow-listed for UEFN** —
+a reflection path that provably bypasses their policy layer. It can crash the editor, and it can
+vanish silently on a version bump. The plan's mitigations are a **hard denylist** (all PIE
+functions, `StopServer`, `EnablePythonInUEFN`, `unregister_toolset_class`), **allow-list-first for
+writes**, a **capability manifest** checked at every listener start, and a **`--supported-only`
+fallback mode**.
+
+## 10. RULE — never give subagents the UEFN bridge
+
+The 12:09 crash and the listener dying again at ~13:00 both happened while **workflow subagents had
+access to the `uefn` MCP tools and were driving the live editor at the same time as the main
+session.** That is a direct violation of the standing rule in `G:\Claude Local\CLAUDE.md`:
+**one Editor, one bridge, never two Claude sessions against it at once.**
+
+Subagents inherit the session's MCP tools. **A research workflow must be told, in its prompt, not
+to touch the `uefn` tools** — or it will, because the tools are right there and the task invites it.
+Web research and file reading only. The live editor belongs to the main session alone.
