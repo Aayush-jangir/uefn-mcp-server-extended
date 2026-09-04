@@ -796,6 +796,194 @@ def get_device_options(actor_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# read_log / read_crashes - off disk, in THIS process
+#
+# IMPLEMENTATION_PLAN.md section 4: log reading belongs here, not in the
+# listener. Three reasons, all of which bit us on 2026-09-04:
+#   1. Zero game-thread cost - it never touches the editor tick.
+#   2. It works when the editor is busy, hung, or the listener is dead. That
+#      is exactly when you most want the log.
+#   3. The listener's get_editor_log served content 37 minutes stale while the
+#      file on disk was current to the second, and ignored its filter_str.
+#      The old handler is left alone deliberately; use this instead.
+# ---------------------------------------------------------------------------
+
+_LOG_DIR = os.path.join(
+    os.environ.get("LOCALAPPDATA", ""), "UnrealEditorFortnite", "Saved", "Logs"
+)
+_LOG_FILES = {
+    "editor": "UnrealEditorFortnite.log",
+    "lore": "Lore.log",
+}
+_CRASH_DIR = os.path.join(
+    os.environ.get("LOCALAPPDATA", ""), "UnrealEditorFortnite", "Saved", "Crashes"
+)
+
+
+def _resolve_log_path(log: str) -> str:
+    """Map a friendly log name (or an explicit path) to a file on disk."""
+    if log in _LOG_FILES:
+        return os.path.join(_LOG_DIR, _LOG_FILES[log])
+    if os.path.isabs(log):
+        return log
+    return os.path.join(_LOG_DIR, log)
+
+
+def _line_level(line: str) -> str:
+    """Classify a UE log line. UE writes 'LogFoo: Error: msg'."""
+    low = line.lower()
+    if ": error:" in low or "fatal" in low:
+        return "error"
+    if ": warning:" in low:
+        return "warning"
+    return "display"
+
+
+@mcp.tool()
+def read_log(
+    lines: int = 100,
+    filter: str = "",
+    level: str = "all",
+    since: str = "",
+    cursor: int = 0,
+    log: str = "editor",
+) -> str:
+    """Read the UEFN editor log from disk.
+
+    Prefer this over get_editor_log: it reads the live file directly, so it is
+    never stale, costs the editor nothing, and still works when the editor is
+    hung or the in-editor listener is dead.
+
+    Args:
+        lines: Return at most this many of the most recent matching lines.
+        filter: Case-insensitive substring; only matching lines are returned.
+        level: "all", "error", "warning", or "error+warning".
+        since: Return only lines at or after this timestamp prefix, e.g.
+               "2026.09.04-07.30". Matches UE's [YYYY.MM.DD-HH.MM.SS:mmm] stamp.
+        cursor: Byte offset from a previous call's next_cursor. Reads only what
+                has been appended since then - use it to poll for new output.
+        log: "editor" (UnrealEditorFortnite.log), "lore" (Lore.log), a bare
+             filename in the Logs folder, or an absolute path.
+
+    Returns lines plus next_cursor, so a follow-up call can read only what is new.
+    """
+    path = _resolve_log_path(log)
+    if not os.path.isfile(path):
+        available = []
+        if os.path.isdir(_LOG_DIR):
+            available = sorted(f for f in os.listdir(_LOG_DIR) if f.endswith(".log"))
+        return json.dumps(
+            {"error": "log not found: %s" % path, "available": available}, indent=2
+        )
+
+    size = os.path.getsize(path)
+    start = max(0, int(cursor))
+    if start > size:
+        start = 0  # file rotated out from under us
+
+    # Without a cursor, read only the tail rather than the whole file.
+    TAIL_BYTES = 2_000_000
+    if cursor <= 0 and size > TAIL_BYTES:
+        start = size - TAIL_BYTES
+
+    with open(path, "rb") as fh:
+        fh.seek(start)
+        raw = fh.read()
+
+    text = raw.decode("utf-8", errors="replace")
+    all_lines = text.splitlines()
+    # A partial first line is likely when we seeked into the middle of one.
+    if start > 0 and all_lines:
+        all_lines = all_lines[1:]
+
+    want = (level or "all").lower()
+    needle = (filter or "").lower()
+
+    matched = []
+    for ln in all_lines:
+        if needle and needle not in ln.lower():
+            continue
+        if want != "all":
+            lv = _line_level(ln)
+            if want == "error+warning":
+                if lv not in ("error", "warning"):
+                    continue
+            elif lv != want:
+                continue
+        if since:
+            stamp = ln[1:24] if ln.startswith("[") else ""
+            if stamp and stamp < since:
+                continue
+        matched.append(ln)
+
+    total = len(matched)
+    if lines > 0:
+        matched = matched[-lines:]
+
+    return json.dumps(
+        {
+            "file": path,
+            "file_size": size,
+            "next_cursor": size,
+            "matched": total,
+            "returned": len(matched),
+            "level": want,
+            "filter": filter,
+            "lines": matched,
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def read_crashes(limit: int = 3, context_lines: int = 40) -> str:
+    """List recent UEFN crash reports and show each one's call stack.
+
+    Reads Saved/Crashes off disk, so it works after the editor has died -
+    which is the only time it matters. Use it to find out why the last
+    session ended.
+
+    Args:
+        limit: How many of the most recent crashes to report.
+        context_lines: Lines of each crash log to include.
+    """
+    if not os.path.isdir(_CRASH_DIR):
+        return json.dumps({"crashes": [], "note": "no crash folder: %s" % _CRASH_DIR}, indent=2)
+
+    entries = []
+    for name in os.listdir(_CRASH_DIR):
+        full = os.path.join(_CRASH_DIR, name)
+        if os.path.isdir(full):
+            entries.append((os.path.getmtime(full), name, full))
+    entries.sort(reverse=True)
+
+    out = []
+    for mtime, name, full in entries[: max(1, limit)]:
+        rec = {
+            "crash": name,
+            "when": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime)),
+            "files": sorted(os.listdir(full))[:12],
+        }
+        log_path = None
+        for f in os.listdir(full):
+            if f.lower().endswith(".log"):
+                log_path = os.path.join(full, f)
+                break
+        if log_path:
+            try:
+                with open(log_path, "rb") as fh:
+                    tail = fh.read()[-200_000:]
+                rec["log_tail"] = tail.decode("utf-8", errors="replace").splitlines()[
+                    -max(1, context_lines):
+                ]
+            except Exception as e:
+                rec["log_error"] = str(e)
+        out.append(rec)
+
+    return json.dumps({"crash_dir": _CRASH_DIR, "count": len(entries), "crashes": out}, indent=2)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

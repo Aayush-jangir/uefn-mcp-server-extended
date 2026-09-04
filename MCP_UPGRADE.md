@@ -5,6 +5,47 @@ measured in a live UEFN editor on that date, not inferred from docs.
 
 ---
 
+## 0. TWO TRAPS THAT PRODUCE CONFIDENT FALSE PASSES
+
+Both were hit in this project. Both look like success. Read these before writing a probe.
+
+### TRAP 1 - `set_object_properties` lies. Read-back through the writing API is NOT evidence.
+
+`ToolsetLibrary.set_object_properties` on a Creative device's `ToyOptionsComponent`:
+
+| What you check | What it says |
+|---|---|
+| the return value | **`True`** |
+| read back via `ToolsetLibrary.get_object_properties` | **changed** |
+| read back via `device.get_user_option_value(name)` | **STILL THE OLD VALUE** |
+| `actor.get_actor_label()` | **STILL THE OLD VALUE** |
+
+**THE TWO REPRESENTATIONS DISAGREE.** `set_object_properties` writes a parallel property bag
+that the device's real option state never reads. Verify through the API you wrote with and you
+will report a working write path that does not exist.
+
+**Rule: the writing API's own read-back is worth nothing. Disk is the only arbiter.**
+Save, then grep the `.uasset` under `__ExternalActors__`. Verified 2026-09-04 - see §11 P4.
+
+### TRAP 2 - a dropped screenshot task cancels the capture silently
+
+`AutomationLibrary.take_high_res_screenshot` returns an `AutomationEditorTask`. **Discard it and
+Python garbage-collects it, which cancels the capture.** No exception, no error, no log line,
+no file - the call simply "succeeds" and nothing is ever written.
+
+The listener keeps every task in `unreal._mcp_screenshot_tasks` for exactly this reason.
+**A future cleanup that deletes that registry as a pointless variable will silently break all
+screenshots.** It is load-bearing. See `_screenshot_tasks()` in `uefn_listener.py`.
+
+### The general form of both
+
+Both traps share one shape: **the call reports success and something reads back correct, while
+the thing you actually wanted never happened.** This is what `CLAUDE.md`'s "verify behaviourally,
+never by reading state back" is defending against. Drive the result through a *different* path
+than the one that produced it - a second API, the disk, the Details panel, the viewport.
+
+---
+
 ## 1. The goal, in Aayush's words
 
 > "change the MCP or update it by ourselves in a way that our UEFN is more connected and
@@ -249,7 +290,12 @@ refs resolved to `{"refPath": "…__verse_0x2DD0D81D_EliminationManager"}`.
 **`DeviceToolset` is Verse-device-only.** Passing a Creative device is rejected with
 `Cannot nativize 'FortCreativeDeviceProp' as 'Device'`.
 
-### 9c. §2b's "write path unknown" — there is a candidate
+### 9c. §2b's "write path unknown" — a CANDIDATE, **NOT CONFIRMED**
+
+> **STATUS 2026-09-04: REFUTED AS A DIRECT WRITE.** Probe P4 (§11) ran it. The call
+> returns `True` and reads back changed through `ToolsetLibrary`, but
+> `get_user_option_value()` still returns the old value. Do NOT read this section as
+> solved. See §0 Trap 1.
 
 `unreal.ToolsetLibrary` **exists with the Beta Access flag OFF** and exposes
 `get_object_properties`, **`set_object_properties`**, `list_struct_properties`,
@@ -420,13 +466,31 @@ succeeds, no error is raised, no file is ever written. The first implementation 
 and produced nothing. The listener now holds tasks in `unreal._mcp_screenshot_tasks`; do not
 "simplify" that registry away.
 
-**Still unresolved:** after that fix, captures stopped completing altogether — `is_task_done()`
-stayed `False` past 60 s, and a subsequent bare call that had worked minutes earlier also stopped
-completing. The editor was rendering throughout (frame count advanced 18793→18836 over ~8 s,
-~5 fps), so this is not a frozen-editor stall. Leading hypothesis: the one failed capture
-(the only one passing `force_game_view=False`) wedged the engine's high-res screenshot request,
-and every later request queues behind it. Untested; needs an editor restart to confirm.
-`console_command("HighResShot WxH")` is the working fallback and auto-names its output.
+**Still unresolved, but now with log evidence** (from the new disk-backed `read_log`):
+
+| # | Call | Result |
+|---|---|---|
+| 1 | `take_high_res_screenshot`, task **dropped**, `force_game_view=False` | no file - the GC bug above |
+| 2 | `take_high_res_screenshot`, defaults, task held | **saved 07:19:00** (`probe_task.png`) |
+| 3 | `take_high_res_screenshot`, task held, `force_game_view=False` | **never completed** |
+| 4 | `take_high_res_screenshot`, defaults, task held - identical to #2 | **never completed** |
+| 5 | console `HighResShot 800x450`, issued after #3 | **saved 07:26:40** (`HighresScreenshot00029.png`) |
+
+#2 and #4 were the same call, and only the earlier one worked. #3 sits between them and is the
+only call that ever passed `force_game_view=False`.
+
+**Sharpened hypothesis: a `force_game_view=False` request wedges the `AutomationLibrary`
+screenshot path, and every later `take_high_res_screenshot` queues behind it forever. The console
+`HighResShot` path is a different code path and is unaffected** - #5 completed normally after the
+wedge. Not a frozen editor: frame count advanced 18793 -> 18836 over ~8 s (~5 fps) throughout.
+
+**Also learned: captures are SLOW when the editor is unfocused** - 26 s, 30 s, and once a full
+**3 minutes** between request and file. Every "it produced no file" conclusion earlier in this
+session was checked too early at least once. Poll for minutes, not seconds.
+
+**Next step:** on a clean editor, call `take_high_res_screenshot` with `force_game_view=False`
+first and see whether it alone reproduces the wedge. Until then `take_screenshot` should be
+considered unreliable, and console `HighResShot` is the working fallback.
 
 ### Known pre-existing defect, not introduced here
 
