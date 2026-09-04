@@ -5,7 +5,7 @@ Requires: pip install mcp
 
 Usage:
     python mcp_server.py
-    python mcp_server.py --port 8765
+    python mcp_server.py --port 8775
 
 Claude Code config (~/.claude/settings.json or project .mcp.json):
     {
@@ -33,8 +33,8 @@ from mcp.server.fastmcp import FastMCP
 # Configuration
 # ---------------------------------------------------------------------------
 
-DEFAULT_PORT = int(os.environ.get("UEFN_MCP_PORT", "8765"))
-MAX_PORT = 8770
+DEFAULT_PORT = int(os.environ.get("UEFN_MCP_PORT", "8775"))
+MAX_PORT = 8780
 REQUEST_TIMEOUT = 30.0
 
 _discovered_port: Optional[int] = None

@@ -28,8 +28,8 @@ import unreal
 # ---------------------------------------------------------------------------
 
 PROTOCOL_VERSION = "0.2.0"
-DEFAULT_PORT = 8765
-MAX_PORT = 8770
+DEFAULT_PORT = 8775
+MAX_PORT = 8780
 TICK_BATCH_LIMIT = 5
 HTTP_TIMEOUT_SEC = 30.0
 POLL_INTERVAL_SEC = 0.02
@@ -502,18 +502,37 @@ def _cmd_focus_selected() -> dict:
 
 
 @_register("get_editor_log")
-def _cmd_get_editor_log(last_n: int = 100, filter_str: str = "") -> dict:
-    """Read recent lines from the UE Output Log file."""
-    log_path = unreal.Paths.project_log_dir()
+def _cmd_get_editor_log(last_n: int = 100, filter_str: str = "", log_name: str = "") -> dict:
+    """Read recent lines from the UE Output Log file.
+
+    log_name: optional exact log filename. Defaults to the editor's own log.
+    """
     log_file = None
     try:
         import os
-        log_dir = str(log_path)
-        # Find the most recent .log file
+        log_dir = str(unreal.Paths.project_log_dir())
         log_files = [f for f in os.listdir(log_dir) if f.endswith(".log")]
-        if log_files:
-            log_files.sort(key=lambda f: os.path.getmtime(os.path.join(log_dir, f)), reverse=True)
-            log_file = os.path.join(log_dir, log_files[0])
+
+        if log_name:
+            preferred = [f for f in log_files if f.lower() == log_name.lower()]
+        else:
+            # The editor's own log, NOT whichever file was touched last.
+            # Lore writes to Lore.log constantly, so "most recently modified"
+            # almost always returned revision-control noise instead of the
+            # Verse build output and gameplay Prints we actually want.
+            preferred = [
+                f for f in log_files
+                if f.lower() == "unrealeditorfortnite.log"
+                and "backup" not in f.lower()
+            ]
+
+        candidates = preferred or log_files
+        if candidates:
+            candidates.sort(
+                key=lambda f: os.path.getmtime(os.path.join(log_dir, f)),
+                reverse=True,
+            )
+            log_file = os.path.join(log_dir, candidates[0])
     except Exception:
         pass
 
@@ -523,10 +542,21 @@ def _cmd_get_editor_log(last_n: int = 100, filter_str: str = "") -> dict:
     try:
         with open(log_file, "r", encoding="utf-8", errors="replace") as f:
             all_lines = f.readlines()
-        lines = all_lines[-last_n:]
+
+        # Filter FIRST, then tail. Tailing first meant a filter only ever
+        # searched the last N lines, so anything older silently returned
+        # nothing at all rather than the matches that were sitting there.
         if filter_str:
-            lines = [l for l in lines if filter_str.lower() in l.lower()]
-        return {"lines": [l.rstrip() for l in lines], "count": len(lines), "file": log_file}
+            needle = filter_str.lower()
+            all_lines = [l for l in all_lines if needle in l.lower()]
+
+        lines = all_lines[-last_n:]
+        return {
+            "lines": [l.rstrip() for l in lines],
+            "count": len(lines),
+            "total_matches": len(all_lines),
+            "file": log_file,
+        }
     except Exception as e:
         return {"lines": [], "error": str(e)}
 
