@@ -18,8 +18,8 @@ accurate at any moment the session might end.
 |---|---|---|
 | 1 | Denylist | **DONE, pushed** |
 | 2 | Capability manifest | **DONE, pushed** |
-| 3 | Result shaping | IN PROGRESS |
-| 4 | Discovery triad | not started |
+| 3 | Result shaping | **DONE, pushed** |
+| 4 | Discovery triad | IN PROGRESS |
 | 5 | Sidecar tools | not started |
 | 6 | `--supported-only` fallback | not started |
 | 7 | Drift check (no editor needed) | not started |
@@ -50,3 +50,22 @@ accurate at any moment the session might end.
   baseline with two entries that cannot exist, got `ok: false, lost_count: 2`
   with both named, then restored the real baseline and reconfirmed clean.
   Beginning item 3.
+- **17:35** — **Item 3 DONE.** Result shaping, measured on TheScar:
+
+
+  | call | before | after | saved |
+  |---|---|---|---|
+  | `get_all_actors` full list | 655,393 B | 249,191 B | **62.0%** |
+  | `get_all_actors summary_only` | 655,393 B | 1,966 B | **99.7%** |
+  | `get_all_actors limit=5` | 655,393 B | 1,400 B | **99.8%** |
+  | `list_devices` | 32,500 B | 14,103 B | **56.6%** |
+
+
+  Honest caveat: 62% off the fat shape still leaves 249 KB for all 1108
+  actors, because the path string is most of the remaining payload and is
+  needed for addressing. **A full unfiltered listing should basically never
+  be requested** — the real win is that `summary_only` and `limit` make the
+  common cases ~99.7% smaller, and the tool description now says so.
+  Added paging (`limit`/`offset`/`has_more`), a `by_class` histogram, and
+  opt-in `detail`. Verified `detail=true`, `class_filter` and
+  `get_selected_actors` all still work. Beginning item 4.

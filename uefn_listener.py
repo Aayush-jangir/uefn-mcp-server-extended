@@ -311,20 +311,100 @@ def _cmd_execute_python(code: str) -> dict:
 # -- Actors ------------------------------------------------------------------
 
 
+def _serialize_actor_slim(actor) -> dict:
+    """Path, label and class - nothing else.
+
+    RESULT SHAPING (IMPLEMENTATION_PLAN.md Phase 2). The dominant token cost of
+    this bridge is RESULTS, not tool schemas. Measured on TheScar:
+    get_all_actors fat-serialised 1108 actors to **655,393 bytes** - about
+    164k tokens, most of a context window, in a single call. Transform data is
+    ~85% of that and is almost never wanted for every actor at once.
+
+    So every list-style tool returns this shape by default and detail comes
+    from a separate call on the handful you actually care about.
+    """
+    return {
+        "path": actor.get_path_name(),
+        "label": actor.get_actor_label(),
+        "class": actor.get_class().get_name(),
+    }
+
+
+def _page(items: list, limit: int, offset: int):
+    """Slice a result list, returning (page, total)."""
+    total = len(items)
+    if offset:
+        items = items[offset:]
+    if limit and limit > 0:
+        items = items[:limit]
+    return items, total
+
+
 @_register("get_all_actors")
-def _cmd_get_all_actors(class_filter: str = "") -> dict:
+def _cmd_get_all_actors(
+    class_filter: str = "",
+    detail: bool = False,
+    limit: int = 0,
+    offset: int = 0,
+    summary_only: bool = False,
+) -> dict:
+    """List actors in the level.
+
+    Returns {path, label, class} per actor by default. Pass detail=true for
+    transforms, but do it on a filtered or paged subset - the full detailed
+    dump of TheScar is ~655 KB.
+
+    summary_only returns just the class histogram, which is usually what you
+    actually want when orienting in an unfamiliar level.
+    """
     actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     actors = actor_sub.get_all_level_actors()
     if class_filter:
         actors = [a for a in actors if a.get_class().get_name() == class_filter]
-    return {"actors": [_serialize_actor(a) for a in actors], "count": len(actors)}
+
+    by_class = {}
+    for a in actors:
+        cn = a.get_class().get_name()
+        by_class[cn] = by_class.get(cn, 0) + 1
+
+    if summary_only:
+        return {
+            "total": len(actors),
+            "by_class": dict(sorted(by_class.items(), key=lambda kv: -kv[1])),
+            "detail": False,
+            "note": "summary only - call again without summary_only for the list",
+        }
+
+    page, total = _page(actors, limit, offset)
+    ser = _serialize_actor if detail else _serialize_actor_slim
+
+    out = {
+        "actors": [ser(a) for a in page],
+        "count": len(page),
+        "total": total,
+        "detail": bool(detail),
+    }
+    if limit or offset:
+        out["offset"] = offset
+        out["limit"] = limit
+        out["has_more"] = (offset + len(page)) < total
+    if not detail:
+        out["note"] = ("slim shape {path,label,class}. Use get_actor_properties "
+                       "for detail on specific actors, or detail=true on a "
+                       "filtered/paged subset.")
+    return out
 
 
 @_register("get_selected_actors")
-def _cmd_get_selected_actors() -> dict:
+def _cmd_get_selected_actors(detail: bool = False) -> dict:
     actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     actors = actor_sub.get_selected_level_actors()
-    return {"actors": [_serialize_actor(a) for a in actors], "count": len(actors)}
+    ser = _serialize_actor if detail else _serialize_actor_slim
+    return {
+        "actors": [ser(a) for a in actors],
+        "count": len(actors),
+        "detail": bool(detail),
+    }
 
 
 @_register("spawn_actor")
@@ -1462,7 +1542,7 @@ def _device_kind(actor) -> str:
 
 
 @_register("list_devices")
-def _cmd_list_devices(class_filter: str = "", kind: str = "") -> dict:
+def _cmd_list_devices(class_filter: str = "", kind: str = "", detail: bool = False) -> dict:
     """List every configurable Creative actor in the level.
 
     Excludes the ~1000 static props, which expose only a label.
@@ -1479,7 +1559,7 @@ def _cmd_list_devices(class_filter: str = "", kind: str = "") -> dict:
         k = _device_kind(a)
         if kind and kind.lower() != k:
             continue
-        entry = _serialize_actor(a)
+        entry = _serialize_actor(a) if detail else _serialize_actor_slim(a)
         entry["kind"] = k
         entry["option_count"] = len(options)
         devices.append(entry)
@@ -1488,7 +1568,8 @@ def _cmd_list_devices(class_filter: str = "", kind: str = "") -> dict:
     for d in devices:
         by_class[d["class"]] = by_class.get(d["class"], 0) + 1
 
-    return {"devices": devices, "count": len(devices), "by_class": by_class}
+    return {"devices": devices, "count": len(devices), "by_class": by_class,
+            "detail": bool(detail)}
 
 
 @_register("get_device_options")

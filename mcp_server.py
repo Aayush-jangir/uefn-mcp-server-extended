@@ -274,20 +274,49 @@ def shutdown() -> str:
 
 
 @mcp.tool()
-def get_all_actors(class_filter: str = "") -> str:
-    """List all actors in the current level.
+def get_all_actors(
+    class_filter: str = "",
+    detail: bool = False,
+    limit: int = 0,
+    offset: int = 0,
+    summary_only: bool = False,
+) -> str:
+    """List actors in the current level.
+
+    Returns {path, label, class} per actor. Detail is opt-in because results,
+    not schemas, dominate token cost: the fully detailed dump of TheScar is
+    ~655 KB (about 164k tokens) for 1108 actors.
+
+    Start with summary_only to see what is in the level, then filter or page.
 
     Args:
-        class_filter: Optional class name to filter by (e.g. 'StaticMeshActor', 'PointLight').
+        class_filter: Exact class name to filter by, e.g. 'VerseDevice_C'.
+        detail: Include transforms. Use only with a filter or a small limit.
+        limit: Max actors to return (0 = all).
+        offset: Skip this many, for paging.
+        summary_only: Return just the class histogram and total.
     """
-    result = _send_command("get_all_actors", {"class_filter": class_filter})
+    result = _send_command(
+        "get_all_actors",
+        {
+            "class_filter": class_filter,
+            "detail": detail,
+            "limit": limit,
+            "offset": offset,
+            "summary_only": summary_only,
+        },
+    )
     return json.dumps(result, indent=2)
 
 
 @mcp.tool()
-def get_selected_actors() -> str:
-    """Get currently selected actors in the UEFN viewport."""
-    result = _send_command("get_selected_actors")
+def get_selected_actors(detail: bool = False) -> str:
+    """Get currently selected actors in the UEFN viewport.
+
+    Args:
+        detail: Include transforms as well as {path, label, class}.
+    """
+    result = _send_command("get_selected_actors", {"detail": detail})
     return json.dumps(result, indent=2)
 
 
@@ -750,7 +779,7 @@ def validate_assets(
 
 
 @mcp.tool()
-def list_devices(class_filter: str = "", kind: str = "") -> str:
+def list_devices(class_filter: str = "", kind: str = "", detail: bool = False) -> str:
     """List every configurable Creative actor placed in the level.
 
     Devices are the gameplay logic of an island - barriers, item granters,
@@ -769,7 +798,8 @@ def list_devices(class_filter: str = "", kind: str = "") -> str:
               spawners. Empty returns both.
     """
     result = _send_command(
-        "list_devices", {"class_filter": class_filter, "kind": kind}
+        "list_devices",
+        {"class_filter": class_filter, "kind": kind, "detail": detail},
     )
     return json.dumps(result, indent=2)
 
