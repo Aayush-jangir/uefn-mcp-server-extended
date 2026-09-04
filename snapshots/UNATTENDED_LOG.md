@@ -23,7 +23,7 @@ accurate at any moment the session might end.
 | 5 | Sidecar tools | **PARTIAL** — raycast/find_actors/batch shipped; reflect, dump_object, job_status deferred |
 | 6 | `--supported-only` fallback | **DONE, pushed** |
 | 7 | Drift check (no editor needed) | **DONE, pushed** |
-| 8 | Docs + draft upstream PR (no editor needed) | IN PROGRESS |
+| 8 | Docs + draft upstream PR (no editor needed) | **DONE, pushed** |
 
 ## Needs Aayush
 
@@ -142,3 +142,11 @@ accurate at any moment the session might end.
   build degrades on its own with nobody present. Verified live: with it on,
   `ue_tools_search` refuses with a clear message while `find_actors` still
   works; turning it off restores 19 search matches.
+- **20:05** — **Item 8 DONE.** `TOOLS.md` documents all 48 tools, leading with
+  the two-write-paths rule and including a "deliberately not provided" and an
+  "unproven — do not claim these" section. README gained a fork summary.
+  `DRAFT_PR.md` written for KirChuvakov — **NOT SUBMITTED**, and it ends with
+  five things to decide first, including reverting the port split, stripping
+  the TheScar-specific `snapshots/` directory, and fixing hard-coded absolute
+  paths in the manifest and write-allow-list. **That last one is a real defect
+  in what I shipped today** — see Needs Aayush.

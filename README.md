@@ -163,6 +163,29 @@ Run via **Tools > Execute Python Script** in the UEFN menu bar.
 | [`tools/generate_uefn_stub.py`](tools/generate_uefn_stub.py) | Generate `.pyi` type stub for IDE autocomplete (37K+ types) |
 | [`tests/test_feasibility.py`](tests/test_feasibility.py) | Verify UEFN sandbox supports HTTP/threading for MCP |
 
+## This fork adds 20 tools
+
+**48 tools total** (28 upstream + 20 new). Full reference: **[TOOLS.md](TOOLS.md)**.
+
+Highlights:
+
+- **Device writes work.** `set_device_option` writes Creative device options via the
+  native property behind them; `set_verse_editable` writes Verse `@editable`s. These are
+  **two different paths that do not cross over**, and each tool refuses the other's device
+  kind because using the wrong one fails silently.
+- **`ue_tools_search` / `ue_tool_describe` / `ue_tool_call`** reach the engine's own 168
+  built-in tools (UMG, Niagara, physics, gameplay tags) for ~600 tokens of schema.
+- **Result shaping.** List tools return `{path, label, class}` with opt-in detail. A full
+  actor dump on a real island went from 655 KB to 1.9 KB in `summary_only` mode.
+- **Safety rails:** a denylist, allow-list-first writes, a capability manifest that detects
+  version-bump breakage, and a `--supported-only` fallback.
+- **`read_log` / `read_crashes`** read off disk from the MCP process, so they still work
+  when the editor is hung or the listener is dead.
+
+> **Before writing anything, read [`MCP_UPGRADE.md`](MCP_UPGRADE.md) §0.** It documents five
+> traps that produce confident false passes — including an API that returns `True`, makes two
+> independent read APIs agree, visibly updates the editor UI, and still does not persist.
+
 ## Documentation
 
 | Document | Description |
