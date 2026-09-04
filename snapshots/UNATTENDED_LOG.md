@@ -22,8 +22,8 @@ accurate at any moment the session might end.
 | 4 | Discovery triad | **DONE, pushed** |
 | 5 | Sidecar tools | **PARTIAL** — raycast/find_actors/batch shipped; reflect, dump_object, job_status deferred |
 | 6 | `--supported-only` fallback | not started |
-| 7 | Drift check (no editor needed) | IN PROGRESS |
-| 8 | Docs + draft upstream PR (no editor needed) | not started |
+| 7 | Drift check (no editor needed) | **DONE, pushed** |
+| 8 | Docs + draft upstream PR (no editor needed) | IN PROGRESS |
 
 ## Needs Aayush
 
@@ -106,3 +106,31 @@ accurate at any moment the session might end.
   wrong trade. Needs a capped, non-recursive, never-call design and a human
   present. `dump_object` and `job_status` deferred for time. Moving to item 7
   (needs no editor).
+- **19:20** — **Item 7 DONE.** `snapshots/drift_report_2026-09-04.md`,
+  reproducible via `tools/drift_check.py`.
+
+
+  **Headline finding: not one scalar `@editable` in TheScar is overridden.**
+  All 74 scalars equal their `.verse` defaults; the only 25 overrides are
+  device bindings. So the tuning lives in the SOURCE, not the Details panel.
+  That narrows TRAP 5 usefully: a rename cannot silently revert a tuned
+  number (there are none), but it WOULD silently unbind a device — a louder,
+  more findable failure. It also means tuning changes belong in `.verse`, and
+  anyone "just tweaking it in the panel" would create a divergence that makes
+  the source misleading from then on.
+
+
+  **DOC DRIFT: 0 — and I do not present that as an all-clear.** The first pass
+  reported **15 findings and every one was a false positive**: `goldReaperThreshold`
+  5000 vs "13" was matching the words *Day 13*; object refs and booleans matched
+  stray prose numbers; `deckHeights [17,402]` vs `[17.0, 402.0]` was actually a
+  MATCH my comparator broke. All 15 are listed and rejected in the report.
+  Only 2 of 99 editables are numeric AND stated in a doc in comparable form, so
+  the method is too weak to prove absence — the report says so in its own
+  "LIMITS" section.
+
+
+  **Also caught a bug that would have faked a clean pass:** the first run scored
+  0/99 because the API returns lower-camel (`auraRefreshSeconds`) while the
+  source declares PascalCase (`AuraRefreshSeconds`). A tidy-looking all-zero
+  result that was entirely a matching bug. Beginning item 8.
