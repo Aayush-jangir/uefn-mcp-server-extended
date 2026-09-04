@@ -1914,6 +1914,217 @@ def _cmd_set_device_option(
 
 
 # ---------------------------------------------------------------------------
+# SIDECAR TOOLS  (IMPLEMENTATION_PLAN.md section 4)
+# ---------------------------------------------------------------------------
+
+
+@_register("raycast")
+def _cmd_raycast(
+    start: List[float],
+    end: Optional[List[float]] = None,
+    direction: Optional[List[float]] = None,
+    distance: float = 10000.0,
+    multi: bool = False,
+    trace_complex: bool = False,
+    draw: bool = False,
+    draw_seconds: float = 5.0,
+) -> dict:
+    """Trace a line through the level and report what it hits.
+
+    THE BEHAVIOURAL-VERIFICATION PRIMITIVE. The standing rule on this project
+    is verify behaviourally, never by reading state back - and a transform
+    read back from the actor you just moved proves only that the setter ran.
+    A raycast proves the geometry is actually THERE, solid, at that place.
+
+    Give either `end`, or `direction` plus `distance`.
+    """
+    if not start or len(start) != 3:
+        raise ValueError("start must be [x, y, z]")
+
+    p0 = unreal.Vector(float(start[0]), float(start[1]), float(start[2]))
+    if end and len(end) == 3:
+        p1 = unreal.Vector(float(end[0]), float(end[1]), float(end[2]))
+    elif direction and len(direction) == 3:
+        d = unreal.Vector(float(direction[0]), float(direction[1]), float(direction[2]))
+        length = (d.x ** 2 + d.y ** 2 + d.z ** 2) ** 0.5
+        if length == 0:
+            raise ValueError("direction must be non-zero")
+        scale = float(distance) / length
+        p1 = unreal.Vector(p0.x + d.x * scale, p0.y + d.y * scale, p0.z + d.z * scale)
+    else:
+        raise ValueError("give either end=[x,y,z] or direction=[x,y,z]")
+
+    world = _world(prefer_game=False)
+    channel = unreal.TraceTypeQuery.TRACE_TYPE_QUERY1
+    debug = (unreal.DrawDebugTrace.FOR_DURATION if draw
+             else unreal.DrawDebugTrace.NONE)
+
+    # HIT DETAIL IS NOT EXTRACTABLE - measured, not assumed.
+    #
+    # The returned HitResult exposes NO fields to Python here. Neither
+    # get_editor_property nor direct attribute access finds location,
+    # impact_point, impact_normal, normal, distance, time, blocking_hit,
+    # hit_actor, actor or hit_component, and GameplayStatics.break_hit_result
+    # is absent too. Two independent probes, both empty.
+    #
+    # So this tool reports WHETHER the line hit geometry, which is the part
+    # that matters for behavioural verification - "is something solid actually
+    # there?" - and does NOT pretend to know what or where. Returning nulls
+    # labelled "location" would be worse than saying nothing.
+    #
+    # If a later version exposes the fields, add them here; the capability
+    # manifest will not catch this one because the struct is not a named
+    # entry point.
+
+    def _hit_dict(h):
+        if h is None:
+            return None
+        return {"hit": True, "hit_result_type": type(h).__name__}
+
+    if multi:
+        hits = unreal.SystemLibrary.line_trace_multi(
+            world, p0, p1, channel, bool(trace_complex), [], debug,
+            True, draw_time=float(draw_seconds),
+        )
+        rows = [_hit_dict(h) for h in (hits or [])]
+        return {
+            "start": _serialize(p0), "end": _serialize(p1),
+            "hit_count": len(rows), "hits": rows,
+        }
+
+    hit = unreal.SystemLibrary.line_trace_single(
+        world, p0, p1, channel, bool(trace_complex), [], debug,
+        True, draw_time=float(draw_seconds),
+    )
+    d = _hit_dict(hit)
+    return {
+        "start": _serialize(p0), "end": _serialize(p1),
+        "hit": d is not None,
+        "note": ("nothing hit - the space is empty along this line"
+                 if d is None else
+                 "geometry confirmed present somewhere along this line"),
+        "detail_available": False,
+        "detail_note": ("hit position/normal/actor are NOT retrievable - the "
+                        "HitResult struct exposes no fields to Python in this "
+                        "build (probed both get_editor_property and direct "
+                        "attributes). Narrow the start/end to localise a hit."),
+    }
+
+
+@_register("find_actors")
+def _cmd_find_actors(
+    query: str = "",
+    by: str = "any",
+    limit: int = 50,
+    offset: int = 0,
+    detail: bool = False,
+) -> dict:
+    """Find actors by label or class substring. Returns the slim shape.
+
+    by: "label" | "class" | "path" | "any"
+    """
+    actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    q = (query or "").lower()
+    field = (by or "any").lower()
+
+    matches = []
+    for a in actor_sub.get_all_level_actors():
+        if not q:
+            matches.append(a)
+            continue
+        label = a.get_actor_label().lower()
+        cls = a.get_class().get_name().lower()
+        path = a.get_path_name().lower()
+        if field == "label":
+            ok = q in label
+        elif field == "class":
+            ok = q in cls
+        elif field == "path":
+            ok = q in path
+        else:
+            ok = q in label or q in cls or q in path
+        if ok:
+            matches.append(a)
+
+    page, total = _page(matches, limit, offset)
+    ser = _serialize_actor if detail else _serialize_actor_slim
+
+    by_class = {}
+    for a in matches:
+        cn = a.get_class().get_name()
+        by_class[cn] = by_class.get(cn, 0) + 1
+
+    return {
+        "query": query,
+        "by": field,
+        "total": total,
+        "count": len(page),
+        "offset": offset,
+        "has_more": (offset + len(page)) < total,
+        "by_class": dict(sorted(by_class.items(), key=lambda kv: -kv[1])[:15]),
+        "actors": [ser(a) for a in page],
+    }
+
+
+@_register("batch")
+def _cmd_batch(
+    commands: List[dict],
+    transaction: str = "",
+    fail_fast: bool = True,
+) -> dict:
+    """Run several listener commands in ONE editor tick.
+
+    Collapses N HTTP round trips and N ticks into one, and with `transaction`
+    set, makes the whole run a single undo entry in the editor.
+
+    Each command is {"command": "...", "params": {...}}.
+    """
+    if not commands:
+        raise ValueError("commands must be a non-empty list")
+
+    results = []
+    ok_count = 0
+
+    def _run_all():
+        nonlocal ok_count
+        for i, spec in enumerate(commands):
+            name = spec.get("command")
+            params = spec.get("params") or {}
+            if not name:
+                results.append({"index": i, "success": False,
+                                "error": "missing 'command'"})
+                if fail_fast:
+                    break
+                continue
+            try:
+                res = _dispatch(name, params)
+                results.append({"index": i, "command": name,
+                                "success": True, "result": res})
+                ok_count += 1
+            except Exception as e:
+                results.append({"index": i, "command": name,
+                                "success": False, "error": str(e)[:300]})
+                if fail_fast:
+                    break
+
+    if transaction:
+        with unreal.ScopedEditorTransaction(str(transaction)):
+            _run_all()
+    else:
+        _run_all()
+
+    return {
+        "requested": len(commands),
+        "ran": len(results),
+        "succeeded": ok_count,
+        "failed": len(results) - ok_count,
+        "transaction": transaction or None,
+        "fail_fast": bool(fail_fast),
+        "results": results,
+    }
+
+
+# ---------------------------------------------------------------------------
 # DISCOVERY TRIAD  (IMPLEMENTATION_PLAN.md section 4)
 #
 # ue_tools_search / ue_tool_describe / ue_tool_call over the ToolsetRegistry

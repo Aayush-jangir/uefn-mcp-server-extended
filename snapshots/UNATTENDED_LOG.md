@@ -20,9 +20,9 @@ accurate at any moment the session might end.
 | 2 | Capability manifest | **DONE, pushed** |
 | 3 | Result shaping | **DONE, pushed** |
 | 4 | Discovery triad | **DONE, pushed** |
-| 5 | Sidecar tools | IN PROGRESS |
+| 5 | Sidecar tools | **PARTIAL** — raycast/find_actors/batch shipped; reflect, dump_object, job_status deferred |
 | 6 | `--supported-only` fallback | not started |
-| 7 | Drift check (no editor needed) | not started |
+| 7 | Drift check (no editor needed) | IN PROGRESS |
 | 8 | Docs + draft upstream PR (no editor needed) | not started |
 
 ## Needs Aayush
@@ -81,3 +81,28 @@ accurate at any moment the session might end.
   tool. Write allow-list seeded empty at
   `snapshots/tool_write_allowlist.json` — reads run freely, writes must be
   driven deliberately once and recorded. Beginning item 5.
+- **18:40** — **Item 5 PARTIAL.** Shipped `raycast`, `find_actors`, `batch`
+  (49 listener handlers, 47 MCP tools). All three tested live: raycast hits a
+  known floor at z=8 and correctly misses in empty sky; find_actors finds 11
+  "manager" labels; batch ran 3 commands in one tick, 3/3 succeeded.
+
+
+  **HIT A STOP CONDITION on raycast detail, and stopped.** The HitResult
+  struct exposes NO fields to Python in this build — `location`,
+  `impact_point`, `impact_normal`, `distance`, `hit_actor` and the rest are
+  absent via BOTH `get_editor_property` and direct attribute access, and
+  `GameplayStatics.break_hit_result` is absent too. Two independent probes,
+  both empty, cause not understood. Per the stop rule I did not keep guessing
+  names. **raycast ships reporting hit/no-hit only**, with
+  `detail_available: false` and an explanation, rather than returning nulls
+  labelled "location" — which would be a false pass of exactly the kind this
+  project keeps catching. Hit/miss is still the useful half: it answers "is
+  something solid actually there?".
+
+
+  **Deliberately deferred: `reflect`.** The plan wants it built on `dir()`.
+  Blind reflection enumeration is what crashed the editor before, and with
+  nobody available to restart it, shipping a dir()-based tool tonight is the
+  wrong trade. Needs a capped, non-recursive, never-call design and a human
+  present. `dump_object` and `job_status` deferred for time. Moving to item 7
+  (needs no editor).

@@ -1022,6 +1022,98 @@ def ue_tool_call(tool_id: str, args: Optional[dict] = None) -> str:
     return json.dumps(result, indent=2)
 
 
+@mcp.tool()
+def raycast(
+    start: list[float],
+    end: Optional[list[float]] = None,
+    direction: Optional[list[float]] = None,
+    distance: float = 10000.0,
+    multi: bool = False,
+    trace_complex: bool = False,
+    draw: bool = False,
+) -> str:
+    """Trace a line through the level to check whether solid geometry is there.
+
+    Use this to VERIFY rather than assume. Reading an actor's transform back
+    only proves the setter ran; a raycast proves something solid is actually
+    in that space.
+
+    Known limit, measured: this build's HitResult exposes no fields to Python,
+    so the tool reports whether the line hit something but cannot report where
+    or what. Narrow the start/end to localise a hit.
+
+    Args:
+        start: [x, y, z] world position to trace from.
+        end: [x, y, z] to trace to. Give this or direction.
+        direction: [x, y, z] direction, used with distance.
+        distance: How far to trace when using direction.
+        multi: Report all hits along the line rather than the first.
+        trace_complex: Trace against per-triangle collision.
+        draw: Draw the trace in the viewport for a few seconds.
+    """
+    params: dict[str, Any] = {
+        "start": start, "distance": distance, "multi": multi,
+        "trace_complex": trace_complex, "draw": draw,
+    }
+    if end is not None:
+        params["end"] = end
+    if direction is not None:
+        params["direction"] = direction
+    result = _send_command("raycast", params)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def find_actors(
+    query: str = "",
+    by: str = "any",
+    limit: int = 50,
+    offset: int = 0,
+    detail: bool = False,
+) -> str:
+    """Find actors by substring, returning paths and labels only.
+
+    The cheapest way to locate things in a big level. TheScar has 1108 actors
+    and listing them all costs ~250 KB, so search instead.
+
+    Args:
+        query: Substring to look for.
+        by: "label", "class", "path", or "any".
+        limit: Max results.
+        offset: Skip this many, for paging.
+        detail: Include transforms too.
+    """
+    result = _send_command(
+        "find_actors",
+        {"query": query, "by": by, "limit": limit, "offset": offset, "detail": detail},
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def batch(
+    commands: list[dict],
+    transaction: str = "",
+    fail_fast: bool = True,
+) -> str:
+    """Run several UEFN commands in a single editor tick.
+
+    Collapses N round trips into one, and with a transaction name set, makes
+    the whole run a single undo step in the editor.
+
+    Args:
+        commands: [{"command": "find_actors", "params": {...}}, ...]
+        transaction: Undo label. Leave empty for no transaction.
+        fail_fast: Stop at the first failure.
+    """
+    result = _send_command(
+        "batch",
+        {"commands": commands, "transaction": transaction, "fail_fast": fail_fast},
+        timeout=180.0,
+    )
+    return json.dumps(result, indent=2)
+
+
 # ---------------------------------------------------------------------------
 # read_log / read_crashes - off disk, in THIS process
 #
