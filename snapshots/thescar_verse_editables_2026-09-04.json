@@ -1,0 +1,371 @@
+{
+  "captured": "2026-09-04",
+  "island": "TheScar",
+  "managers": {
+    "hud manager": {
+      "class": "VerseDevice_C",
+      "count": 14,
+      "editables": {
+        "dailyDoneLingerSeconds": 8,
+        "debugForceRole": 0,
+        "labelTextSize": 38,
+        "mainBottomMargin": 200,
+        "numberTextSize": 130,
+        "refreshSeconds": 0.25,
+        "secondaryRightMargin": 40,
+        "secondaryTextSize": 34,
+        "secondaryTopMargin": 330,
+        "showDebugOverlay": false,
+        "taskLeftMargin": 60,
+        "timerLabelTextSize": 56,
+        "timerTopMargin": 60,
+        "verboseLog": false
+      },
+      "path": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075F3F702_2056282134",
+      "types": {
+        "dailyDoneLingerSeconds": "number",
+        "debugForceRole": "integer",
+        "labelTextSize": "number",
+        "mainBottomMargin": "number",
+        "numberTextSize": "number",
+        "refreshSeconds": "number",
+        "secondaryRightMargin": "number",
+        "secondaryTextSize": "number",
+        "secondaryTopMargin": "number",
+        "showDebugOverlay": "boolean",
+        "taskLeftMargin": "number",
+        "timerLabelTextSize": "number",
+        "timerTopMargin": "number",
+        "verboseLog": "boolean"
+      }
+    },
+    "juggernaut manager": {
+      "class": "VerseDevice_C",
+      "count": 19,
+      "editables": {
+        "announceMessage": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C660758BF602_1497818775.juggernaut_manager_0.__verse_0x347B274B_AnnounceMessage"
+        },
+        "auraRefreshSeconds": 8,
+        "baseHealth": 100,
+        "beaconAsset": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C660758BF602_1497818775.juggernaut_manager_0.Devices_creative_prop_asset_3"
+        },
+        "beaconHeight": 420,
+        "beaconParkDepth": -5400,
+        "beaconScale": 0.35,
+        "beaconTickSeconds": 0.12,
+        "bonusHealth": 300,
+        "bonusShield": 200,
+        "debugLogAura": false,
+        "holdToUnlockSeconds": 90,
+        "juggernautAura": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C660758BF602_1497818775.juggernaut_manager_0.__verse_0x1AC823E2_JuggernautAura"
+        },
+        "juggernautMarker": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C660758BF602_1497818775.juggernaut_manager_0.__verse_0x750CAD02_JuggernautMarker"
+        },
+        "openingPhaseSeconds": 120,
+        "survivorHealth": 200,
+        "survivorShield": 100,
+        "takedownXP": 100,
+        "verboseLog": false
+      },
+      "path": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C660758BF602_1497818775",
+      "types": {
+        "announceMessage": "object",
+        "auraRefreshSeconds": "number",
+        "baseHealth": "number",
+        "beaconAsset": "object",
+        "beaconHeight": "number",
+        "beaconParkDepth": "number",
+        "beaconScale": "number",
+        "beaconTickSeconds": "number",
+        "bonusHealth": "number",
+        "bonusShield": "number",
+        "debugLogAura": "boolean",
+        "holdToUnlockSeconds": "number",
+        "juggernautAura": "object",
+        "juggernautMarker": "object",
+        "openingPhaseSeconds": "number",
+        "survivorHealth": "number",
+        "survivorShield": "number",
+        "takedownXP": "integer",
+        "verboseLog": "boolean"
+      }
+    },
+    "leaderboard manager": {
+      "class": "VerseDevice_C",
+      "count": 7,
+      "editables": {
+        "boardLeftMargin": 60,
+        "boardTopMargin": 270,
+        "debugLogEliminations": false,
+        "debugSeedBoard": false,
+        "eliminationManager": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C660753CF602_1717204867.leaderboard_manager_0.__verse_0x2DD0D81D_EliminationManager"
+        },
+        "objectiveLine": "TOP THE BOARD - EVERY DEATH SCARS THE GROUND",
+        "rowsToShow": 5
+      },
+      "path": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C660753CF602_1717204867",
+      "types": {
+        "boardLeftMargin": "number",
+        "boardTopMargin": "number",
+        "debugLogEliminations": "boolean",
+        "debugSeedBoard": "boolean",
+        "eliminationManager": "object",
+        "objectiveLine": "object",
+        "rowsToShow": "integer"
+      }
+    },
+    "loadout manager": {
+      "class": "VerseDevice_C",
+      "count": 2,
+      "editables": {
+        "grantDebounceSeconds": 2,
+        "weaponGranters": [
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075ECF402_1100210733.loadout_manager_0.item_granter_device_0"
+          },
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075ECF402_1100210733.loadout_manager_0.item_granter_device_1"
+          },
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075ECF402_1100210733.loadout_manager_0.item_granter_device_2"
+          },
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075ECF402_1100210733.loadout_manager_0.item_granter_device_3"
+          },
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075ECF402_1100210733.loadout_manager_0.item_granter_device_4"
+          },
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075ECF402_1100210733.loadout_manager_0.item_granter_device_5"
+          },
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075ECF402_1100210733.loadout_manager_0.item_granter_device_6"
+          },
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075ECF402_1100210733.loadout_manager_0.item_granter_device_7"
+          }
+        ]
+      },
+      "path": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075ECF402_1100210733",
+      "types": {
+        "grantDebounceSeconds": "number",
+        "weaponGranters": "array"
+      }
+    },
+    "onboarding manager": {
+      "class": "VerseDevice_C",
+      "count": 3,
+      "editables": {
+        "introDelay": 1.5,
+        "introMessage": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075F1F402_1188206668.onboarding_manager_0.__verse_0xC3063ED5_IntroMessage"
+        },
+        "showIntroMessage": false
+      },
+      "path": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075F1F402_1188206668",
+      "types": {
+        "introDelay": "number",
+        "introMessage": "object",
+        "showIntroMessage": "boolean"
+      }
+    },
+    "progression manager": {
+      "class": "VerseDevice_C",
+      "count": 10,
+      "editables": {
+        "accoladeEveryNKills": 3,
+        "dailyBonusXP": 150,
+        "dailyKillTarget": 3,
+        "eliminationManager": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C6607549F702_1988977435.progression_manager_0.__verse_0x2DD0D81D_EliminationManager"
+        },
+        "goldReaperThreshold": 5000,
+        "killAccolade": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C6607549F702_1988977435.progression_manager_0.__verse_0xBCF1FA65_KillAccolade"
+        },
+        "notifier": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C6607549F702_1988977435.progression_manager_0.__verse_0x4FBE9B0B_Notifier"
+        },
+        "silverThreshold": 1000,
+        "xPPerKill": 10,
+        "xPPerMatch": 25
+      },
+      "path": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C6607549F702_1988977435",
+      "types": {
+        "accoladeEveryNKills": "integer",
+        "dailyBonusXP": "integer",
+        "dailyKillTarget": "integer",
+        "eliminationManager": "object",
+        "goldReaperThreshold": "integer",
+        "killAccolade": "object",
+        "notifier": "object",
+        "silverThreshold": "integer",
+        "xPPerKill": "integer",
+        "xPPerMatch": "integer"
+      }
+    },
+    "revenge manager": {
+      "class": "VerseDevice_C",
+      "count": 4,
+      "editables": {
+        "notifier": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C6607549F702_1982136434.revenge_manager_0.__verse_0x4FBE9B0B_Notifier"
+        },
+        "pingRangeMetres": 30,
+        "proximityCheckSeconds": 1,
+        "revengeXP": 50
+      },
+      "path": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C6607549F702_1982136434",
+      "types": {
+        "notifier": "object",
+        "pingRangeMetres": "number",
+        "proximityCheckSeconds": "number",
+        "revengeXP": "integer"
+      }
+    },
+    "scar manager": {
+      "class": "VerseDevice_C",
+      "count": 12,
+      "editables": {
+        "characterCentreOffset": 88,
+        "debugFillArena": false,
+        "deckHeights": [
+          17,
+          402
+        ],
+        "deckTolerance": 60,
+        "groundHeight": 17,
+        "parkDepth": -5000,
+        "scarsPerTeam": 25,
+        "teamCount": 4,
+        "teamScarAssetA": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075F2F402_1093225846.scar_manager_0.Devices_creative_prop_asset_5"
+        },
+        "teamScarAssetB": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075F2F402_1093225846.scar_manager_0.Devices_creative_prop_asset_6"
+        },
+        "teamScarAssetC": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075F2F402_1093225846.scar_manager_0.Devices_creative_prop_asset_7"
+        },
+        "teamScarAssetD": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075F2F402_1093225846.scar_manager_0.Devices_creative_prop_asset_8"
+        }
+      },
+      "path": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075F2F402_1093225846",
+      "types": {
+        "characterCentreOffset": "number",
+        "debugFillArena": "boolean",
+        "deckHeights": "array",
+        "deckTolerance": "number",
+        "groundHeight": "number",
+        "parkDepth": "number",
+        "scarsPerTeam": "integer",
+        "teamCount": "integer",
+        "teamScarAssetA": "object",
+        "teamScarAssetB": "object",
+        "teamScarAssetC": "object",
+        "teamScarAssetD": "object"
+      }
+    },
+    "trophy manager": {
+      "class": "VerseDevice_C",
+      "count": 28,
+      "editables": {
+        "approachZone": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.__verse_0xE49DE5E9_ApproachZone"
+        },
+        "chamberBarriers": [
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.barrier_device_0"
+          },
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.barrier_device_1"
+          },
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.barrier_device_2"
+          },
+          {
+            "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.barrier_device_3"
+          }
+        ],
+        "claimHoldSeconds": 10,
+        "claimTickAudio": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.__verse_0xDC2086FD_ClaimTickAudio"
+        },
+        "claimTimer": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.__verse_0x2CB9105F_ClaimTimer"
+        },
+        "claimZone": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.__verse_0x43824F07_ClaimZone"
+        },
+        "gateAsset": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.Devices_creative_prop_asset_4"
+        },
+        "gateBaseHeight": 786,
+        "gateDropDepth": 380,
+        "gateDropSpeed": 300,
+        "gateRingRadius": 768,
+        "gateRunScale": 1.25,
+        "gateTickSeconds": 0.05,
+        "matchEnder": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.__verse_0xABAE8533_MatchEnder"
+        },
+        "notifier": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.__verse_0x4FBE9B0B_Notifier"
+        },
+        "plinthTopHeight": 978,
+        "tickSeconds": 0.25,
+        "trophyAsset": {
+          "refPath": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839.trophy_manager_0.Devices_creative_prop_asset_1"
+        },
+        "trophyCentreX": 0,
+        "trophyCentreY": 0,
+        "trophyClearance": 50,
+        "trophyHoldSeconds": 1.5,
+        "trophyNaturalHeight": 50.5,
+        "trophyRiseSpeed": 320,
+        "trophyRiseTickSeconds": 0.05,
+        "trophyScale": 6,
+        "trophySpinDegreesPerSecond": 140,
+        "verboseLog": false
+      },
+      "path": "/TheScar/TheScar.TheScar:PersistentLevel.VerseDevice_C_UAID_BCFCE7C66075E6F702_1818435839",
+      "types": {
+        "approachZone": "object",
+        "chamberBarriers": "array",
+        "claimHoldSeconds": "number",
+        "claimTickAudio": "object",
+        "claimTimer": "object",
+        "claimZone": "object",
+        "gateAsset": "object",
+        "gateBaseHeight": "number",
+        "gateDropDepth": "number",
+        "gateDropSpeed": "number",
+        "gateRingRadius": "number",
+        "gateRunScale": "number",
+        "gateTickSeconds": "number",
+        "matchEnder": "object",
+        "notifier": "object",
+        "plinthTopHeight": "number",
+        "tickSeconds": "number",
+        "trophyAsset": "object",
+        "trophyCentreX": "number",
+        "trophyCentreY": "number",
+        "trophyClearance": "number",
+        "trophyHoldSeconds": "number",
+        "trophyNaturalHeight": "number",
+        "trophyRiseSpeed": "number",
+        "trophyRiseTickSeconds": "number",
+        "trophyScale": "number",
+        "trophySpinDegreesPerSecond": "number",
+        "verboseLog": "boolean"
+      }
+    }
+  },
+  "total": 99
+}
