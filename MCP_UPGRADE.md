@@ -82,6 +82,27 @@ cannot start. The Tools menu's "Enable Python" checkbox does **not** persist it 
 to the file by hand, **with the editor closed** (see Trap 3). Any new sandbox project needs this
 step first.
 
+### HARD RULE - publishing is NOT scriptable from this bridge
+
+Checked properly on 2026-09-04, so the next session does not repeat the search:
+
+- The `ToolsetRegistry` corpus (470 KB, 12 toolsets, **168 tools**) contains **no publish tool**.
+  Searching every tool name and description for publish/upload/version returned 4 hits, **all
+  false positives** matching "conversion" (`ListConversionFunctions`, `FixupMVVMData`, …).
+- Named subsystem candidates **all absent**: `FortCreativePublishSubsystem`,
+  `FortPublishSubsystem`, `ValkyriePublishSubsystem`, `FortUGCPublishSubsystem`,
+  `FortProjectSubsystem`.
+
+Publishing is a GUI wizard, and it is outward-facing and account-affecting, so it stays a human
+action. **Do not go looking for a scripted publish path; there isn't one.**
+
+**And know what a private version does and does not prove.** Publishing a *private version* runs
+the real build, cook, validation and upload pipeline - which is the actual risk surface for
+MCP-authored actors, and settles "does the publish pipeline accept them". It does **NOT** run
+Epic's human content review; that happens only on public release. So a clean private build must
+never be written up as "publish accepts this" without that qualifier. Provenance of a property
+value is not something moderation inspects; the build pipeline is.
+
 ### The general form of all of these
 
 Both traps share one shape: **the call reports success and something reads back correct, while
@@ -816,6 +837,11 @@ There is **no publish path through this bridge**, and this was checked rather th
 
 Publishing is a GUI wizard, and it is outward-facing and account-affecting, so it is a human
 action by design. **P15 stays UNPROVEN until a private version is published by hand.**
+
+**Scope of what a private version proves** (qualifier added 2026-09-04): it runs build, cook,
+validation and upload - the real risk surface for MCP-authored actors - but **not** Epic's human
+content review, which happens only on public release. Never write a clean private build up as
+"publish accepts this" without that qualifier.
 
 **Nothing may be written to The Scar until it is** — a write path that passes validation but
 breaks at publish would be the worst thing to discover on a live island.
