@@ -17,8 +17,8 @@ accurate at any moment the session might end.
 | # | Item | Status |
 |---|---|---|
 | 1 | Denylist | **DONE, pushed** |
-| 2 | Capability manifest | IN PROGRESS |
-| 3 | Result shaping | not started |
+| 2 | Capability manifest | **DONE, pushed** |
+| 3 | Result shaping | IN PROGRESS |
 | 4 | Discovery triad | not started |
 | 5 | Sidecar tools | not started |
 | 6 | `--supported-only` fallback | not started |
@@ -41,3 +41,12 @@ accurate at any moment the session might end.
   works. Deliberately NOT enforced for `execute_python` — a denylist there
   is theatre, since arbitrary Python reaches the same symbols; noted in the
   code. New `denylist` tool reports what is blocked. Beginning item 2.
+- **17:10** — **Item 2 DONE.** Capability manifest: 40 named entry points
+  probed (no reflection sweeps), baseline stored at
+  `snapshots/capability_manifest.json`, diffed on every listener start and
+  logged loudly on loss. All 40 present today. Engine reports
+  `6.0.0-57566230+++Fortnite+Release-42.10`, independently confirming §9a.
+  **Verified the alarm actually fires** rather than assuming: seeded the
+  baseline with two entries that cannot exist, got `ok: false, lost_count: 2`
+  with both named, then restored the real baseline and reconfirmed clean.
+  Beginning item 3.

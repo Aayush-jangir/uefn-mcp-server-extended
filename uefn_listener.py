@@ -726,6 +726,237 @@ def _cmd_set_viewport_camera(
 
 
 # ---------------------------------------------------------------------------
+# CAPABILITY MANIFEST  (IMPLEMENTATION_PLAN.md section 7)
+#
+# Almost everything this fork can do rides on reflection paths Epic has NOT
+# allow-listed for UEFN - call_method on toolset CDOs, ToolsetLibrary,
+# native-property writes. Those can vanish silently on a version bump.
+#
+# This snapshots every entry point we depend on and diffs it against a stored
+# baseline, so a future breakage reads as
+#     "the manifest says DeviceToolset went away in 42.20"
+# instead of
+#     "something is mysteriously broken and nobody knows when it started".
+#
+# Probes are NAMED CANDIDATES ONLY, checked with hasattr/getattr. It never
+# enumerates reflected members - that pattern crashed the editor once already
+# (MCP_UPGRADE.md section 8).
+# ---------------------------------------------------------------------------
+
+# (key, kind, target) - kind is "class", "attr", or "subsystem"
+_CAPABILITY_SPEC = [
+    # The reflection backbone. If these go, the fork's advantage goes with them.
+    ("unreal.ToolsetRegistry", "class", "ToolsetRegistry"),
+    ("ToolsetRegistry.is_available", "attr", ("ToolsetRegistry", "is_available")),
+    ("ToolsetRegistry.get_all_toolset_json_schemas", "attr",
+     ("ToolsetRegistry", "get_all_toolset_json_schemas")),
+    ("ToolsetRegistry.execute_tool", "attr", ("ToolsetRegistry", "execute_tool")),
+    ("unreal.ToolsetLibrary", "class", "ToolsetLibrary"),
+    ("ToolsetLibrary.get_object_properties", "attr",
+     ("ToolsetLibrary", "get_object_properties")),
+    ("ToolsetLibrary.set_object_properties", "attr",
+     ("ToolsetLibrary", "set_object_properties")),
+    ("ToolsetLibrary.undo_transaction", "attr", ("ToolsetLibrary", "undo_transaction")),
+
+    # Verse device read/write - the section 15 path.
+    ("unreal.DeviceToolset", "class", "DeviceToolset"),
+    ("unreal.VerseToolset", "class", "VerseToolset"),
+    ("unreal.SessionToolset", "class", "SessionToolset"),
+    ("unreal.EditorAppToolset", "class", "EditorAppToolset"),
+    ("unreal.LogsToolset", "class", "LogsToolset"),
+
+    # Creative device write path - native properties.
+    ("unreal.EditorActorSubsystem", "class", "EditorActorSubsystem"),
+    ("unreal.LevelEditorSubsystem", "class", "LevelEditorSubsystem"),
+    ("LevelEditorSubsystem.save_current_level", "attr",
+     ("LevelEditorSubsystem", "save_current_level")),
+    ("LevelEditorSubsystem.pilot_level_actor", "attr",
+     ("LevelEditorSubsystem", "pilot_level_actor")),
+    ("unreal.UnrealEditorSubsystem", "class", "UnrealEditorSubsystem"),
+
+    # Validation, screenshots, console.
+    ("unreal.FortEditorValidatorSubsystem", "class", "FortEditorValidatorSubsystem"),
+    ("unreal.DataValidationUsecase", "class", "DataValidationUsecase"),
+    ("unreal.AutomationLibrary", "class", "AutomationLibrary"),
+    ("AutomationLibrary.take_high_res_screenshot", "attr",
+     ("AutomationLibrary", "take_high_res_screenshot")),
+    ("unreal.SystemLibrary", "class", "SystemLibrary"),
+    ("SystemLibrary.execute_console_command", "attr",
+     ("SystemLibrary", "execute_console_command")),
+
+    # Transactions.
+    ("unreal.ScopedEditorTransaction", "class", "ScopedEditorTransaction"),
+    ("unreal.BypassContainerCheck", "class", "BypassContainerCheck"),
+
+    # Asset plumbing.
+    ("unreal.AssetRegistryHelpers", "class", "AssetRegistryHelpers"),
+    ("unreal.EditorAssetLibrary", "class", "EditorAssetLibrary"),
+    ("unreal.EditorLoadingAndSavingUtils", "class", "EditorLoadingAndSavingUtils"),
+]
+
+# Toolset CDOs we reach through call_method. Acquiring the CDO is read-only.
+_CAPABILITY_CDOS = [
+    "DeviceToolset", "VerseToolset", "SessionToolset",
+    "EditorAppToolset", "LogsToolset",
+]
+
+_MANIFEST_PATH = r"G:/UEFN/uefn-mcp-server-extended/snapshots/capability_manifest.json"
+
+
+def _probe_capabilities() -> dict:
+    """Snapshot every entry point the fork depends on. Named probes only."""
+    caps = {}
+
+    for key, kind, target in _CAPABILITY_SPEC:
+        try:
+            if kind == "class":
+                caps[key] = hasattr(unreal, target)
+            elif kind == "attr":
+                holder_name, attr = target
+                holder = getattr(unreal, holder_name, None)
+                if holder is None:
+                    caps[key] = False
+                elif holder_name.endswith("Subsystem"):
+                    sub = unreal.get_editor_subsystem(holder)
+                    caps[key] = bool(sub is not None and hasattr(sub, attr))
+                else:
+                    caps[key] = hasattr(holder, attr)
+            else:
+                caps[key] = False
+        except Exception as e:
+            caps[key] = "ERROR: %s" % str(e)[:80]
+
+    # Toolset CDOs reachable for call_method
+    for name in _CAPABILITY_CDOS:
+        key = "CDO:%s" % name
+        try:
+            cls = getattr(unreal, name, None)
+            caps[key] = bool(cls is not None and unreal.get_default_object(cls) is not None)
+        except Exception as e:
+            caps[key] = "ERROR: %s" % str(e)[:80]
+
+    # The schema corpus - size and shape are the early-warning signal.
+    try:
+        blob = unreal.ToolsetRegistry.get_all_toolset_json_schemas()
+        data = json.loads(blob)
+        caps["registry.is_available"] = bool(unreal.ToolsetRegistry.is_available())
+        caps["registry.schema_bytes"] = len(blob)
+        caps["registry.toolset_count"] = len(data)
+        caps["registry.tool_count"] = sum(len(ts.get("tools", [])) for ts in data)
+        caps["registry.toolsets"] = sorted(ts.get("name", "?") for ts in data)
+    except Exception as e:
+        caps["registry.error"] = str(e)[:150]
+
+    try:
+        caps["engine_version"] = str(unreal.SystemLibrary.get_engine_version())
+    except Exception as e:
+        caps["engine_version"] = "ERROR: %s" % str(e)[:80]
+
+    return caps
+
+
+def _load_manifest_baseline() -> Optional[dict]:
+    try:
+        with io.open(_MANIFEST_PATH, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def _diff_manifest(baseline: dict, current: dict) -> dict:
+    base = baseline.get("capabilities", {}) if baseline else {}
+    lost, gained, changed = [], [], []
+    for k in sorted(set(base) | set(current)):
+        b = base.get(k, "<absent from baseline>")
+        c = current.get(k, "<absent now>")
+        if b == c:
+            continue
+        if b is True and c is not True:
+            lost.append({"key": k, "was": b, "now": c})
+        elif c is True and b is not True:
+            gained.append({"key": k, "was": b, "now": c})
+        else:
+            changed.append({"key": k, "was": b, "now": c})
+    return {"lost": lost, "gained": gained, "changed": changed}
+
+
+@_register("capability_manifest")
+def _cmd_capability_manifest(save_baseline: bool = False) -> dict:
+    """Snapshot the entry points this fork depends on, and diff vs the baseline.
+
+    LOST capabilities are the ones that matter: they mean a path this project
+    is built on has gone away, most likely from an engine version bump.
+    """
+    current = _probe_capabilities()
+    baseline = _load_manifest_baseline()
+
+    out = {
+        "engine_version": current.get("engine_version"),
+        "probed": len(current),
+        "baseline_present": baseline is not None,
+        "baseline_captured": baseline.get("captured") if baseline else None,
+        "baseline_engine": (baseline.get("capabilities", {}) or {}).get("engine_version")
+        if baseline else None,
+    }
+
+    if baseline is not None:
+        diff = _diff_manifest(baseline, current)
+        out["diff"] = diff
+        out["lost_count"] = len(diff["lost"])
+        out["ok"] = len(diff["lost"]) == 0
+        if diff["lost"]:
+            out["WARNING"] = (
+                "%d capability/ies this fork depends on are GONE. See diff.lost. "
+                "Most likely cause: an engine version bump changed the reflection "
+                "surface." % len(diff["lost"])
+            )
+    else:
+        out["note"] = "no baseline stored yet - call with save_baseline=true to create one"
+
+    if save_baseline:
+        payload = {
+            "captured": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "engine_version": current.get("engine_version"),
+            "capabilities": current,
+        }
+        try:
+            os.makedirs(os.path.dirname(_MANIFEST_PATH), exist_ok=True)
+            with io.open(_MANIFEST_PATH, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(json.dumps(payload, indent=2, sort_keys=True))
+            out["baseline_written"] = _MANIFEST_PATH
+        except Exception as e:
+            out["baseline_write_error"] = str(e)[:200]
+
+    out["capabilities"] = current
+    return out
+
+
+def _manifest_startup_check() -> None:
+    """Run at listener start; log loudly if anything we depend on has gone."""
+    try:
+        current = _probe_capabilities()
+        baseline = _load_manifest_baseline()
+        if baseline is None:
+            _log("Capability manifest: no baseline stored yet "
+                 "(call capability_manifest with save_baseline=true)", "warning")
+            return
+        diff = _diff_manifest(baseline, current)
+        if diff["lost"]:
+            _log("CAPABILITY MANIFEST: %d entry point(s) LOST since %s"
+                 % (len(diff["lost"]), baseline.get("captured", "?")), "error")
+            for item in diff["lost"][:10]:
+                _log("  LOST: %s (was %r, now %r)"
+                     % (item["key"], item["was"], item["now"]), "error")
+        elif diff["gained"] or diff["changed"]:
+            _log("Capability manifest: no losses; %d gained, %d changed"
+                 % (len(diff["gained"]), len(diff["changed"])))
+        else:
+            _log("Capability manifest: all %d entry points present" % len(current))
+    except Exception as e:
+        _log("Capability manifest check failed: %s" % e, "warning")
+
+
+# ---------------------------------------------------------------------------
 # DENYLIST  (IMPLEMENTATION_PLAN.md section 7)
 #
 # Everything reached through call_method / execute_tool bypasses Epic's own
@@ -2066,6 +2297,7 @@ def start_listener(port: int = 0, show_status: bool = True) -> int:
 
     _log(f"Listener started on http://127.0.0.1:{port}")
     _log(f"Registered {len(_HANDLERS)} command handlers")
+    _manifest_startup_check()
 
     if show_status:
         win = unreal._mcp_status_window

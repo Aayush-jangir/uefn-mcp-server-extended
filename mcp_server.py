@@ -911,6 +911,27 @@ def denylist() -> str:
     return json.dumps(result, indent=2)
 
 
+@mcp.tool()
+def capability_manifest(save_baseline: bool = False) -> str:
+    """Check whether the engine entry points this server depends on still exist.
+
+    Almost everything this fork can do rides on reflection paths Epic has not
+    allow-listed for UEFN, and those can vanish silently on a version bump.
+    This snapshots ~40 named entry points and diffs them against a stored
+    baseline, so a future breakage reads as "DeviceToolset went away in 42.20"
+    rather than "something is mysteriously broken".
+
+    Run it first when anything that used to work stops working.
+
+    Args:
+        save_baseline: Overwrite the stored baseline with the current state.
+                       Do this deliberately, after confirming the current
+                       state is good - it is what future runs compare against.
+    """
+    result = _send_command("capability_manifest", {"save_baseline": save_baseline})
+    return json.dumps(result, indent=2)
+
+
 # ---------------------------------------------------------------------------
 # read_log / read_crashes - off disk, in THIS process
 #
