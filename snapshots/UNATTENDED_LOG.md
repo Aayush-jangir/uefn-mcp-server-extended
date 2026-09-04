@@ -150,3 +150,10 @@ accurate at any moment the session might end.
   the TheScar-specific `snapshots/` directory, and fixing hard-coded absolute
   paths in the manifest and write-allow-list. **That last one is a real defect
   in what I shipped today** — see Needs Aayush.
+- **20:20** — **Fixed the defect I had just flagged** rather than only listing it.
+  The capability manifest and write allow-list hard-coded `G:/UEFN/...`, which
+  breaks for anyone else cloning the fork. Both now resolve via `_repo_path()`
+  from the listener's own directory, with fallbacks because `__file__` is not
+  always set under UEFN's Execute Python Script. Verified live: paths resolve,
+  manifest still reads its baseline (`ok: true`), write allow-list still refuses
+  `CreateCollection`, and read dispatch still works.

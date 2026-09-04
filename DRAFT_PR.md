@@ -123,8 +123,9 @@ the editor is hung or the listener is dead.
 1. **Revert the port split to 8765–8770?** Almost certainly yes for upstream.
 2. **Split into smaller PRs?** Result shaping alone is a clean, uncontroversial first PR;
    the device-write work is the big one; the triad is the most speculative.
-3. **Absolute paths.** `snapshots/` paths and `G:/UEFN/...` are hard-coded in the manifest
-   and write-allow-list. Must be made relative to the repo root before submitting.
+3. ~~**Absolute paths.**~~ **FIXED 2026-09-04** — the manifest and write-allow-list now
+   resolve via `_repo_path()` from the listener's own directory, with fallbacks for when
+   `__file__` is not set under UEFN's Execute Python Script. Verified live.
 4. **The `snapshots/` directory** contains TheScar-specific data (99 `@editable`s, drift
    report, unattended log). **Strip it from the PR** — it is project data, not server code.
 5. Confirm the tone reads as a contribution rather than a rewrite. It is a lot of surface

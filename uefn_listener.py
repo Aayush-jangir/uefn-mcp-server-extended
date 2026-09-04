@@ -806,6 +806,25 @@ def _cmd_set_viewport_camera(
 # ===========================================================================
 
 
+# Repo root, resolved at import so the fork works wherever it is cloned.
+# The listener is exec'd by UEFN's Execute Python Script, which usually sets
+# __file__ - but not always, so fall back to this file's own directory and
+# finally to the cwd rather than raising.
+def _repo_root() -> str:
+    try:
+        return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        pass
+    for cand in (getattr(unreal, "_mcp_repo_root", None), os.getcwd()):
+        if cand and os.path.isdir(cand):
+            return cand
+    return "."
+
+
+def _repo_path(*parts: str) -> str:
+    return os.path.normpath(os.path.join(_repo_root(), *parts))
+
+
 # ---------------------------------------------------------------------------
 # CAPABILITY MANIFEST  (IMPLEMENTATION_PLAN.md section 7)
 #
@@ -881,7 +900,7 @@ _CAPABILITY_CDOS = [
     "EditorAppToolset", "LogsToolset",
 ]
 
-_MANIFEST_PATH = r"G:/UEFN/uefn-mcp-server-extended/snapshots/capability_manifest.json"
+_MANIFEST_PATH = _repo_path("snapshots", "capability_manifest.json")
 
 
 def _probe_capabilities() -> dict:
@@ -2222,9 +2241,7 @@ _WRITE_VERBS = (
     "disable", "register", "unregister", "fixup", "convert", "generate",
 )
 
-_WRITE_ALLOWLIST_PATH = (
-    r"G:/UEFN/uefn-mcp-server-extended/snapshots/tool_write_allowlist.json"
-)
+_WRITE_ALLOWLIST_PATH = _repo_path("snapshots", "tool_write_allowlist.json")
 
 
 def _build_tool_index() -> dict:
