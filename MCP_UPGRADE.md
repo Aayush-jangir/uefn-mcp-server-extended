@@ -82,16 +82,47 @@ cannot start. The Tools menu's "Enable Python" checkbox does **not** persist it 
 to the file by hand, **with the editor closed** (see Trap 3). Any new sandbox project needs this
 step first.
 
-### HARD RULE - TWO write paths, and they do NOT cross over
+### TRAP 4 - TWO WRITE PATHS, NO CROSSOVER. The wrong one fails SILENTLY.
 
-- **Creative device** option (`Device_*`, Island Settings) -> write the **native UPROPERTY**
-  (`set_editor_property`, or the `set_device_option` tool).
-- **Verse device** `@editable` (`VerseDevice_C`) -> **`DeviceToolset.SetDeviceProperty`**, with a
-  **JSON-encoded** value. `'99'`, `'true'`, `'"a string"'` - a **bare** string is silently
-  discarded and the call still returns `None`.
+| Device kind | What you are writing | The ONLY path that works |
+|---|---|---|
+| **Creative device** - `Device_*`, Island Settings, spawners | Creative options | **native UPROPERTY** -> `set_device_option` |
+| **Verse device** - `VerseDevice_C` | Verse `@editable`s | **`SetDeviceProperty`, JSON-encoded** -> `set_verse_editable` |
 
-Verse `@editable`s are **not** native properties, so `set_device_option` does nothing at all on a
-Verse device. Full evidence in section 15.
+**Neither reaches the other.** Verse `@editable`s are **not** native properties on the actor -
+`ProbeInt`, `probe_int`, `probeint` and every other candidate came back **ABSENT** from
+`get_editor_property`. Point `set_device_option` at one of TheScar's nine managers and it does
+**nothing**, quietly.
+
+Two ways the Verse path lies to you if you call the engine API raw:
+
+- **The value must be JSON-encoded.** `'99'`, `'true'`, `'"a string"'`. A **bare** string is
+  **silently discarded** - no error, no change.
+- **`SetDeviceProperty` returns `None` whether it worked or not.** The return value carries zero
+  signal.
+
+**Both are handled by the `set_verse_editable` tool**, which JSON-encodes for you and verifies by
+reading the value back, raising if it did not land. **Both tools refuse the other's device kind by
+construction**, naming the right one - this class of mistake is designed out, not remembered.
+
+Full evidence in section 15.
+
+### TRAP 5 - renaming a Verse `@editable` silently reverts it to default
+
+Verse overrides serialise under a **mangled name that hashes the fully-qualified Verse path** -
+`__verse_0xB084D5C3_ProbeString`. The override is keyed to that hash.
+
+**So a rebuild that renames an `@editable`, renames its class, or moves it between modules changes
+the hash, and every override written against the old name is orphaned. The value silently reverts
+to the declared default.** No error, no warning - the device just quietly behaves differently.
+
+**This is a real constraint on TheScar**, whose nine managers carry dozens of hand-tuned
+`@editable`s. **Anyone refactoring a manager must know that renaming a field can silently discard
+its tuning** - including tuning a designer set by hand in the Details panel months ago, not just
+values written through this bridge.
+
+Proven safe: rebuilds that change only **code bodies** - paths stable, overrides survive
+(section 15c). Untested and to be assumed dangerous: any rebuild that changes a name or a path.
 
 ### HARD RULE - publishing is NOT scriptable from this bridge
 

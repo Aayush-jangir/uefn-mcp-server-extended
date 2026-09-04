@@ -1176,6 +1176,170 @@ def _cmd_get_device_options(actor_path: str) -> dict:
     }
 
 
+# -- Verse devices -----------------------------------------------------------
+#
+# TWO WRITE PATHS, NO CROSSOVER (MCP_UPGRADE.md section 0 / section 15):
+#   Creative device option -> native UPROPERTY   -> set_device_option
+#   Verse device @editable -> SetDeviceProperty  -> set_verse_editable
+#
+# The wrong one fails SILENTLY, so both tools below refuse the other's device
+# kind by construction rather than relying on the caller remembering.
+
+
+def _device_toolset():
+    return unreal.get_default_object(unreal.DeviceToolset)
+
+
+def _verse_schema(actor):
+    """The @editable schema for a Verse device, or None if not a Verse device.
+
+    DeviceToolset itself is the authority: it rejects Creative devices with
+    "Cannot nativize 'FortCreativeDeviceProp' as 'Device'". That is a more
+    reliable test than matching on the class name.
+    """
+    try:
+        raw = _device_toolset().call_method("ListDeviceProperties", args=(actor,))
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def _is_verse_device(actor) -> bool:
+    return _verse_schema(actor) is not None
+
+
+def _verse_values(actor, names: List[str]) -> dict:
+    raw = _device_toolset().call_method("GetDeviceProperties", args=(actor, names))
+    return json.loads(raw)
+
+
+def _resolve_editable_name(schema: dict, requested: str) -> Optional[str]:
+    """Match an @editable name case-insensitively.
+
+    ListDeviceProperties reports lower-camel keys ("probeInt") while
+    GetDeviceProperties answers in the declared case ("ProbeInt"), so accept
+    either and hand back the caller's spelling where possible.
+    """
+    keys = list(schema.keys())
+    for k in keys:
+        if k == requested:
+            return requested
+    for k in keys:
+        if k.lower() == requested.lower():
+            return requested if requested else k
+    return None
+
+
+@_register("get_verse_editables")
+def _cmd_get_verse_editables(actor_path: str) -> dict:
+    """Read a Verse device's @editable names, types and live values.
+
+    These are the values a creator sets in the Details panel on a Verse
+    device. They are NOT Creative device options and do NOT appear in
+    get_device_options - a VerseDevice returns only its three base Creative
+    options there (MCP_UPGRADE.md section 15a).
+    """
+    actor = _find_actor(actor_path)
+    schema = _verse_schema(actor)
+    if schema is None:
+        raise ValueError(
+            "%s (%s) is not a Verse device. For a Creative device use "
+            "get_device_options instead."
+            % (actor.get_actor_label(), actor.get_class().get_name())
+        )
+
+    names = list(schema.keys())
+    try:
+        values = _verse_values(actor, names)
+    except Exception as e:
+        values = {"<read failed>": str(e)[:200]}
+
+    types = {}
+    for k, v in schema.items():
+        types[k] = v.get("type", "object") if isinstance(v, dict) else "unknown"
+
+    return {
+        "actor": _serialize_actor(actor),
+        "editables": values,
+        "types": types,
+        "count": len(names),
+        "note": ("write these with set_verse_editable, NOT set_device_option - "
+                 "@editables are not native properties"),
+    }
+
+
+@_register("set_verse_editable")
+def _cmd_set_verse_editable(
+    actor_path: str,
+    name: str,
+    value: Any,
+    save: bool = False,
+) -> dict:
+    """Write one @editable on a Verse device, and verify it actually landed.
+
+    Two footguns are handled here so callers never meet them:
+
+    1. The underlying SetDeviceProperty takes a JSON-ENCODED value. A bare
+       string is silently discarded - no error, no change. This encodes with
+       json.dumps, so pass a normal Python value.
+    2. SetDeviceProperty returns None whether it worked or not, so its return
+       value carries zero signal. This reads the value back through
+       GetDeviceProperties and RAISES if it did not land, rather than
+       reporting a success that never happened.
+    """
+    actor = _find_actor(actor_path)
+    schema = _verse_schema(actor)
+    if schema is None:
+        raise ValueError(
+            "%s (%s) is not a Verse device, so it has no @editables. "
+            "For a Creative device option use set_device_option instead."
+            % (actor.get_actor_label(), actor.get_class().get_name())
+        )
+
+    resolved = _resolve_editable_name(schema, name)
+    if resolved is None:
+        raise ValueError(
+            "No @editable named %r on %s. Available: %s"
+            % (name, actor.get_actor_label(), ", ".join(sorted(schema.keys())))
+        )
+
+    before = _verse_values(actor, [resolved]).get(resolved)
+    encoded = json.dumps(value)  # THE critical step - see footgun 1 above
+
+    with unreal.ScopedEditorTransaction("MCP set_verse_editable: %s" % resolved):
+        _device_toolset().call_method(
+            "SetDeviceProperty", args=(actor, resolved, encoded)
+        )
+
+    after = _verse_values(actor, [resolved]).get(resolved)
+    landed = after == value
+
+    if not landed:
+        raise RuntimeError(
+            "set_verse_editable did NOT take on %s.%s - requested %r, still %r. "
+            "SetDeviceProperty returns None either way, so this was verified by "
+            "reading back. Nothing was changed."
+            % (actor.get_actor_label(), resolved, value, after)
+        )
+
+    saved = None
+    if save:
+        saved = _level_editor().save_current_level()
+
+    return {
+        "actor": _serialize_actor(actor),
+        "editable": resolved,
+        "sent_as_json": encoded,
+        "before": before,
+        "after": after,
+        "verified": True,
+        "saved": saved,
+        "note": ("verified by read-back, not by return value. Durable only once "
+                 "saved. A rebuild that RENAMES this @editable or moves its class "
+                 "will orphan this override - see MCP_UPGRADE.md section 15c."),
+    }
+
+
 def _native_candidates(option_name: str) -> List[str]:
     """Plausible native UPROPERTY names for a device option.
 
@@ -1248,6 +1412,18 @@ def _cmd_set_device_option(
               without it the write lives in memory and dies with the editor.
     """
     actor = _find_actor(actor_path)
+
+    # TWO WRITE PATHS, NO CROSSOVER. A Verse device's @editables are not
+    # native properties, so this tool would silently no-op on one. Refuse by
+    # construction rather than relying on the caller remembering.
+    if _is_verse_device(actor):
+        raise ValueError(
+            "%s is a Verse device (%s). Its @editables are NOT Creative device "
+            "options and NOT native properties, so set_device_option would "
+            "silently do nothing. Use set_verse_editable instead."
+            % (actor.get_actor_label(), actor.get_class().get_name())
+        )
+
     options = _read_options(actor)
     if options is None:
         raise ValueError(

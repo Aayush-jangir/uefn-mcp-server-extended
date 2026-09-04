@@ -818,6 +818,11 @@ def set_device_option(
     function-style options (events such as "Reset Progress"), which have no
     value to set.
 
+    NOT for Verse devices. A VerseDevice_C's @editables are not native
+    properties, so this tool refuses them and points you at
+    set_verse_editable. Using the wrong path fails silently, which is why the
+    refusal is built in.
+
     IMPORTANT: the change is in memory until the level is saved. Pass
     save=True, or call save_current_level, or it dies with the editor.
 
@@ -830,6 +835,62 @@ def set_device_option(
     result = _send_command(
         "set_device_option",
         {"actor_path": actor_path, "option": option, "value": value, "save": save},
+        timeout=120.0,
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def get_verse_editables(actor_path: str) -> str:
+    """Read the @editable values on a Verse device.
+
+    These are the settings a creator tunes in the Details panel on a Verse
+    device - a manager's thresholds, labels and toggles. They are a DIFFERENT
+    thing from Creative device options: get_device_options does not show them,
+    and a Verse device reports only its three base Creative options there.
+
+    Args:
+        actor_path: Path, label, or name of the Verse device.
+    """
+    result = _send_command("get_verse_editables", {"actor_path": actor_path})
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def set_verse_editable(
+    actor_path: str,
+    name: str,
+    value: Any,
+    save: bool = False,
+) -> str:
+    """Change one @editable on a Verse device.
+
+    TWO WRITE PATHS, NO CROSSOVER:
+      - Creative device (Device_*, Island Settings) -> set_device_option
+      - Verse device (VerseDevice_C)                -> this tool
+
+    Using the wrong one fails SILENTLY, so each tool refuses the other's kind
+    of device with an error naming the right one.
+
+    Two footguns are handled for you. The underlying engine call needs a
+    JSON-encoded value and silently discards a bare string; this encodes for
+    you, so pass a normal value. And that call returns nothing whether or not
+    it worked, so this reads the value back and FAILS LOUDLY if it did not
+    land, rather than reporting a success that never happened.
+
+    Note: a Verse rebuild that RENAMES this @editable, or moves its class,
+    orphans the override and the value silently reverts to its default.
+    Rebuilds that only change code bodies are safe.
+
+    Args:
+        actor_path: Path, label, or name of the Verse device.
+        name: The @editable's name, e.g. "rowsToShow".
+        value: New value. Pass a normal string/int/float/bool.
+        save: Save the level afterwards, making the change durable.
+    """
+    result = _send_command(
+        "set_verse_editable",
+        {"actor_path": actor_path, "name": name, "value": value, "save": save},
         timeout=120.0,
     )
     return json.dumps(result, indent=2)
